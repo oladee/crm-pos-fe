@@ -44,7 +44,7 @@ export const SEED_CASHIERS: Cashier[] = [
 export const SEED_CUSTOMERS: PosCustomer[] = [
   { id: 'cust-01', name: 'Mama Nkechi Kitchen', phone: '08051234001' },
   { id: 'cust-02', name: 'Alhaji Musa Stores', phone: '08051234002' },
-  { id: 'cust-05', name: 'Palace Hotel Nasarawa', phone: '08051234005' },
+  { id: 'cust-05', name: 'Palace Hotel', phone: '08051234005' },
   { id: 'cust-09', name: 'De Choice Restaurant', phone: '08051234009' },
 ];
 
@@ -52,9 +52,8 @@ const genDeviceId = () => 'dev-' + Math.random().toString(36).slice(2, 10);
 
 export const DEFAULT_STORE: StoreProfile = {
   id: 'store',
-  storeName: 'FudFarmer Retail - Nasarawa',
+  storeName: 'FudFarmer POS',
   storeType: 'Owned',
-  hubId: 'hub-nasarawa',
   currency: 'NGN',
   receiptFooter: 'Thank you for shopping with FudFarmer!',
   deviceId: genDeviceId(),
@@ -79,17 +78,26 @@ export async function ensureSeeded(): Promise<StoreProfile> {
   } else {
     // Backfill settings added after this till was first set up, so an existing
     // install never runs with tax/discount policy undefined.
+    const staleLocation =
+      store.hubId === 'hub-nasarawa' ||
+      store.storeId === 'hub-nasarawa' ||
+      (store.storeName || '').includes('Nasarawa');
+    let storeName = store.storeName;
+    if (staleLocation) storeName = DEFAULT_STORE.storeName;
+    else if (store.storeName.includes('???')) storeName = store.storeName.replace(/\?{3}/g, '-');
     const patched: StoreProfile = {
       ...store,
-      storeName: store.storeName.includes('???')
-        ? store.storeName.replace(/\?{3}/g, '-')
-        : store.storeName,
+      storeName,
       taxRatePct: store.taxRatePct ?? DEFAULT_STORE.taxRatePct,
       taxInclusive: store.taxInclusive ?? DEFAULT_STORE.taxInclusive,
       taxLabel: store.taxLabel ?? DEFAULT_STORE.taxLabel,
       discountApprovalThresholdPct: store.discountApprovalThresholdPct ?? DEFAULT_STORE.discountApprovalThresholdPct,
       maxDiscountPct: store.maxDiscountPct ?? DEFAULT_STORE.maxDiscountPct,
     };
+    if (staleLocation) {
+      delete patched.hubId;
+      delete patched.storeId;
+    }
     if (JSON.stringify(patched) !== JSON.stringify(store)) { store = patched; await saveStore(store); }
   }
 

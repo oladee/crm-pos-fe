@@ -138,8 +138,8 @@ export async function verifyPin(input: {
   pin: string;
   deviceId?: string;
   deviceLabel?: string;
-}): Promise<Cashier> {
-  const body = await sendJson<{ staff: RemoteStaff; token: string }>(
+}): Promise<{ staff: Cashier; location?: RemoteStore }> {
+  const body = await sendJson<{ staff: RemoteStaff; token: string; location?: RemoteStore }>(
     '/pos/auth/pin',
     'POST',
     input,
@@ -148,11 +148,14 @@ export async function verifyPin(input: {
   if (body.token) setPinToken(body.token);
   const staff = body.staff;
   return {
-    id: staff.id,
-    name: staff.name,
-    pin: input.pin,
-    role: staff.role,
-    isActive: staff.isActive,
+    staff: {
+      id: staff.id,
+      name: staff.name,
+      pin: input.pin,
+      role: staff.role,
+      isActive: staff.isActive,
+    },
+    location: body.location,
   };
 }
 

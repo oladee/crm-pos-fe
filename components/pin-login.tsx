@@ -1,10 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { toast } from 'sonner';
 import { Delete } from 'lucide-react';
 import { Cashier, StoreProfile } from '@/lib/types';
-import { fetchStores, verifyPin, type RemoteStore } from '@/lib/remote';
+import { verifyPin, type RemoteStore } from '@/lib/remote';
 
 export function PinLogin({
   store,
@@ -18,38 +18,24 @@ export function PinLogin({
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
-  const [remoteStores, setRemoteStores] = useState<RemoteStore[]>([]);
-
-  useEffect(() => {
-    fetchStores(store?.deviceId)
-      .then(setRemoteStores)
-      .catch(() => setRemoteStores([]));
-  }, [store?.deviceId]);
-
-  const hubId = store?.hubId || store?.storeId || '';
 
   const submit = async (value: string) => {
     const ident = username.trim().toLowerCase();
     if (!ident || busy) return;
-    if (!hubId) {
-      toast.error('Select a location first');
-      setPin('');
-      return;
-    }
     if (!/^\d{4}$/.test(value)) return;
     setBusy(true);
     try {
       const isEmail = ident.includes('@');
       const verified = await verifyPin({
-        hubId,
         username: isEmail ? undefined : ident,
         email: isEmail ? ident : undefined,
         pin: value,
         deviceId: store?.deviceId,
         deviceLabel: store?.deviceLabel,
       });
-      await onLogin(verified);
-      toast.success(`Welcome, ${verified.name.split(' ')[0]}`);
+      if (verified.location) await onBindStore?.(verified.location);
+      await onLogin(verified.staff);
+      toast.success(`Welcome, ${verified.staff.name.split(' ')[0]}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Wrong username or PIN');
       setPin('');
@@ -71,28 +57,11 @@ export function PinLogin({
       <div className="w-full max-w-sm">
         <div className="text-center mb-6">
           <span className="h-14 w-14 rounded-2xl bg-[var(--color-brand)] grid place-items-center font-black text-white text-lg mx-auto">FF</span>
-          <h1 className="text-xl font-black mt-3">{store?.storeName || 'FudFarmer POS'}</h1>
+          <h1 className="text-xl font-black mt-3">FudFarmer POS</h1>
           <p className="text-xs text-[var(--color-ink-dim)]">{store?.deviceLabel} · Sign in to sell</p>
         </div>
 
         <div className="space-y-3">
-          {remoteStores.length > 0 && store && (
-            <select
-              value={hubId}
-              onChange={async (e) => {
-                const remote = remoteStores.find((s) => s.id === e.target.value);
-                if (!remote) return;
-                await onBindStore?.(remote);
-              }}
-              className="w-full h-11 rounded-xl bg-[var(--color-surface)] border border-[var(--color-line)] px-3 text-sm"
-            >
-              <option value="">Select location</option>
-              {remoteStores.map((s) => (
-                <option key={s.id} value={s.id}>{s.name}{s.code ? ` (${s.code})` : ''}</option>
-              ))}
-            </select>
-          )}
-
           <label className="block">
             <span className="sr-only">Username</span>
             <input
