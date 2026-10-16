@@ -7,6 +7,7 @@ import { SalesHistory, ReturnModal } from '@/components/sales-history';
 import { PinGate } from '@/components/shift-panels';
 import { Receipt } from '@/components/receipt';
 import { RequireShift } from '@/components/route-guards';
+import { HistorySkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
 import { can, canFully } from '@/lib/permissions';
 import { reverseSale } from '@/lib/db';
@@ -16,7 +17,7 @@ import { PosSale } from '@/lib/types';
 
 export default function HistoryPage() {
   return (
-    <RequireShift>
+    <RequireShift skeleton={<HistorySkeleton />}>
       <HistoryScreen />
     </RequireShift>
   );

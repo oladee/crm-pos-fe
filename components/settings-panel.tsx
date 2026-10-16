@@ -16,6 +16,7 @@ import {
 import { toast } from 'sonner';
 import { StoreProfile, Cashier } from '@/lib/types';
 import { PERMISSIONS, POS_ROLES, MATRIX, roleLabel, PosRole } from '@/lib/permissions';
+import { ThemeToggle } from '@/components/theme-provider';
 
 type Tab = 'store' | 'tax' | 'discounts' | 'returns' | 'offline' | 'permissions' | 'staff';
 
@@ -58,8 +59,8 @@ export function SettingsPanel({
   const tabs = staffOnly ? TABS.filter((t) => t.key === 'staff') : TABS;
 
   return (
-    <div className="fixed inset-0 z-50 bg-[var(--color-bg)] flex flex-col">
-      <div className="px-4 py-3 border-b border-[var(--color-line)] flex items-center justify-between gap-3 shrink-0">
+    <div className="manager-shell fixed inset-0 z-50 flex min-h-[100dvh] flex-col bg-[var(--color-bg)]">
+      <div className="manager-header flex shrink-0 items-center justify-between gap-3 px-4">
         <div className="flex items-center gap-2 min-w-0">
           <Cog size={18} className="text-[var(--color-brand)] shrink-0" />
           <div className="min-w-0">
@@ -74,7 +75,8 @@ export function SettingsPanel({
               <Save size={13} /> Save
             </button>
           )}
-          <button onClick={onClose} className="h-9 px-3 rounded-lg border border-[var(--color-line)] text-xs font-bold inline-flex items-center gap-1.5">
+          <ThemeToggle compact />
+          <button onClick={onClose} className="secondary-action h-9 px-3 rounded-[10px] text-xs font-bold inline-flex items-center gap-1.5">
             <X size={14} /> Close
           </button>
         </div>

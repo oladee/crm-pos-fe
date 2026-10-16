@@ -6,12 +6,13 @@ import { toast } from 'sonner';
 import { SupervisorView } from '@/components/supervisor-view';
 import { PinGate } from '@/components/shift-panels';
 import { RequireCashier } from '@/components/route-guards';
+import { SupervisorSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
 import { canFully } from '@/lib/permissions';
 
 export default function SupervisorPage() {
   return (
-    <RequireCashier>
+    <RequireCashier skeleton={<SupervisorSkeleton />}>
       <SupervisorScreen />
     </RequireCashier>
   );

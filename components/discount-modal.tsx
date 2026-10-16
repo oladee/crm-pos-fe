@@ -24,7 +24,7 @@ export function DiscountModal({
   const needsApproval = appliedPct > approvalPct;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/70">
+    <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
       <div className="w-full max-w-sm rounded-2xl bg-[var(--color-surface)] border border-[var(--color-line)] overflow-hidden">
         <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between">
           <div className="min-w-0">

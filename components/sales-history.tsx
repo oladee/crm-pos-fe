@@ -37,8 +37,8 @@ export function SalesHistory({
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/70">
-      <div className="w-full max-w-lg rounded-2xl bg-[var(--color-surface)] border border-[var(--color-line)] overflow-hidden max-h-[92vh] flex flex-col">
+    <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="modal-shell flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-[16px]">
         <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between shrink-0">
           <h2 className="font-black flex items-center gap-2"><ReceiptIcon size={17} /> Sales</h2>
           <button onClick={onClose} className="text-[var(--color-ink-dim)]"><X size={20} /></button>
@@ -126,7 +126,7 @@ export function ReturnModal({
     setQty((c) => ({ ...c, [id]: Math.max(0, Math.min(max, (c[id] || 0) + d)) }));
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center p-4 bg-black/70">
+    <div className="modal-backdrop fixed inset-0 z-[60] grid place-items-center p-4">
       <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] border border-[var(--color-line)] overflow-hidden max-h-[92vh] flex flex-col">
         <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between shrink-0">
           <div>

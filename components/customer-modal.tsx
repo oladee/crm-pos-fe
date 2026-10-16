@@ -15,7 +15,7 @@ export function CustomerModal({
   const [q, setQ] = useState('');
   const list = customers.filter((c) => !q || c.name.toLowerCase().includes(q.toLowerCase()) || (c.phone || '').includes(q));
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/70">
+    <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
       <div className="w-full max-w-sm rounded-2xl bg-[var(--color-surface)] border border-[var(--color-line)] overflow-hidden">
         <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between">
           <h2 className="font-black">Customer</h2>

@@ -8,16 +8,20 @@ export async function enterPin(page: Page, pin: string) {
 
 export async function loginAs(page: Page, username: string, pin: string) {
   await page.goto('/login');
-  await expect(page.getByRole('heading', { name: /FudFarmer/ })).toBeVisible();
+  await expect(page.getByText('Store checkout')).toBeVisible();
   await page.getByPlaceholder('Username').fill(username);
   await enterPin(page, pin);
   await page.waitForURL(/\/(shift|sell)/, { timeout: 15_000 });
 }
 
+export async function openMore(page: Page) {
+  await page.getByRole('button', { name: 'More actions' }).click();
+}
+
 export async function openShiftIfNeeded(page: Page) {
   if (page.url().includes('/sell')) return;
-  await expect(page.getByRole('heading', { name: 'No open shift' })).toBeVisible();
-  await page.getByRole('button', { name: 'Open shift' }).click();
+  await expect(page.getByRole('heading', { name: 'Ready to start selling?' })).toBeVisible();
+  await page.getByRole('button', { name: 'Start my shift' }).click();
   await page.getByRole('button', { name: /Start shift/ }).click();
   await page.waitForURL('**/sell', { timeout: 10_000 });
 }

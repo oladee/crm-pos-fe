@@ -27,8 +27,8 @@ export function MoneyPad({ value, onChange }: { value: string; onChange: (v: str
 
 function Shell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/70">
-      <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] border border-[var(--color-line)] overflow-hidden max-h-[92vh] flex flex-col">
+    <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="modal-shell w-full max-w-md overflow-hidden max-h-[92vh] flex flex-col rounded-[16px]">
         <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between shrink-0">
           <h2 className="font-black">{title}</h2>
           <button onClick={onClose} className="text-[var(--color-ink-dim)]"><X size={20} /></button>
@@ -50,7 +50,7 @@ export function OpenShiftModal({ cashierName, onClose, onOpen }: { cashierName: 
         className="w-full h-12 px-3 my-2 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)] text-xl font-black text-center outline-none focus:border-[var(--color-brand)]" />
       <MoneyPad value={v} onChange={setV} />
       <button onClick={() => onOpen(toKobo(Number(v) || 0))}
-        className="w-full h-14 mt-3 rounded-xl bg-[var(--color-brand)] text-white font-black flex items-center justify-center gap-2">
+        className="primary-action w-full h-14 mt-3 rounded-[11px] font-black flex items-center justify-center gap-2">
         <Clock size={17} /> Start shift
       </button>
     </Shell>

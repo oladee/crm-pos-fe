@@ -2,24 +2,16 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Loader2 } from 'lucide-react';
 import { useTill } from '@/contexts/till-context';
+import { SellSkeleton } from '@/components/skeletons';
 
-function BootSpinner() {
-  return (
-    <div className="h-screen grid place-items-center text-[var(--color-ink-dim)]">
-      <Loader2 className="animate-spin" />
-    </div>
-  );
-}
-
-export function BootGate({ children }: { children: React.ReactNode }) {
+export function BootGate({ children, skeleton }: { children: React.ReactNode; skeleton?: React.ReactNode }) {
   const { booting } = useTill();
-  if (booting) return <BootSpinner />;
+  if (booting) return <>{skeleton ?? <SellSkeleton />}</>;
   return <>{children}</>;
 }
 
-export function RequireCashier({ children }: { children: React.ReactNode }) {
+export function RequireCashier({ children, skeleton }: { children: React.ReactNode; skeleton?: React.ReactNode }) {
   const { booting, cashier } = useTill();
   const router = useRouter();
 
@@ -27,11 +19,11 @@ export function RequireCashier({ children }: { children: React.ReactNode }) {
     if (!booting && !cashier) router.replace('/login');
   }, [booting, cashier, router]);
 
-  if (booting || !cashier) return <BootSpinner />;
+  if (booting || !cashier) return <>{skeleton ?? <SellSkeleton />}</>;
   return <>{children}</>;
 }
 
-export function RequireShift({ children }: { children: React.ReactNode }) {
+export function RequireShift({ children, skeleton }: { children: React.ReactNode; skeleton?: React.ReactNode }) {
   const { booting, cashier, shift } = useTill();
   const router = useRouter();
 
@@ -41,7 +33,7 @@ export function RequireShift({ children }: { children: React.ReactNode }) {
     else if (!shift) router.replace('/shift');
   }, [booting, cashier, shift, router]);
 
-  if (booting || !cashier || !shift) return <BootSpinner />;
+  if (booting || !cashier || !shift) return <>{skeleton ?? <SellSkeleton />}</>;
   return <>{children}</>;
 }
 
@@ -56,5 +48,5 @@ export function RedirectHome() {
     else router.replace('/sell');
   }, [booting, cashier, shift, router]);
 
-  return <BootSpinner />;
+  return <SellSkeleton />;
 }

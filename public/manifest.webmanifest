@@ -1,13 +1,13 @@
 {
-  "name": "FudFarmer POS",
-  "short_name": "FF POS",
-  "description": "Offline-first point of sale for FudFarmer retail stores, franchises and subscribers.",
+  "name": "SalesOS Retail POS",
+  "short_name": "SalesOS POS",
+  "description": "The SalesOS retail point-of-sale feature for checkout, inventory, sales, and customer management.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#0b1220",
-  "theme_color": "#15803d",
+  "background_color": "#0b0d0c",
+  "theme_color": "#0b0d0c",
   "icons": [
     { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
     { "src": "/icon-maskable.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }

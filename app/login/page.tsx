@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { PinLogin } from '@/components/pin-login';
 import { BootGate } from '@/components/route-guards';
+import { LoginSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
 
 export default function LoginPage() {
@@ -16,7 +17,7 @@ export default function LoginPage() {
   }, [cashier, shift, router]);
 
   return (
-    <BootGate>
+    <BootGate skeleton={<LoginSkeleton />}>
       <PinLogin
         store={store}
         onBindStore={bindStore}

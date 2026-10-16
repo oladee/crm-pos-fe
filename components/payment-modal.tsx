@@ -42,8 +42,8 @@ export function PaymentModal({
   const quick = [1000, 2000, 5000, 10000];
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/70">
-      <div className="w-full max-w-md rounded-2xl bg-[var(--color-surface)] border border-[var(--color-line)] overflow-hidden">
+    <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="modal-shell w-full max-w-md overflow-hidden rounded-[16px]">
         <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between">
           <h2 className="font-black">Payment</h2>
           <button onClick={onClose} className="text-[var(--color-ink-dim)]"><X size={20} /></button>

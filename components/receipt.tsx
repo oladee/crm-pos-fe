@@ -8,7 +8,7 @@ import { fmt } from '@/lib/money';
 export function Receipt({ sale, store, onClose }: { sale: PosSale; store: StoreProfile; onClose: () => void }) {
   const when = new Date(sale.createdAt);
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/70">
+    <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
       <div className="w-full max-w-xs rounded-2xl bg-white text-black overflow-hidden">
         <div className="p-3 border-b border-black/10 flex items-center justify-between">
           <span className="inline-flex items-center gap-1.5 text-xs font-black text-emerald-700"><Check size={14} /> Sale complete</span>

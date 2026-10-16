@@ -4,12 +4,13 @@ import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { SettingsPanel } from '@/components/settings-panel';
 import { RequireCashier } from '@/components/route-guards';
+import { SettingsSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
 import { can } from '@/lib/permissions';
 
 export default function SettingsPage() {
   return (
-    <RequireCashier>
+    <RequireCashier skeleton={<SettingsSkeleton />}>
       <SettingsScreen />
     </RequireCashier>
   );

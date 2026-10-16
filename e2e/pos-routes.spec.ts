@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { loginAndOpenShift, loginAs, openShiftIfNeeded } from './helpers';
+import { enterPin, loginAndOpenShift, loginAs, openMore } from './helpers';
 
 test.describe('POS route split', () => {
   test('unsigned / redirects to /login', async ({ page }) => {
@@ -11,14 +11,14 @@ test.describe('POS route split', () => {
   test('cashier PIN login lands on /shift', async ({ page }) => {
     await loginAs(page, 'aisha', '1234');
     await expect(page).toHaveURL(/\/shift/);
-    await expect(page.getByRole('heading', { name: 'No open shift' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Ready to start selling?' })).toBeVisible();
   });
 
   test('/sell without an open shift bounces to /shift', async ({ page }) => {
     await loginAs(page, 'aisha', '1234');
     await page.goto('/sell');
     await page.waitForURL('**/shift', { timeout: 10_000 });
-    await expect(page.getByRole('heading', { name: 'No open shift' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Ready to start selling?' })).toBeVisible();
   });
 
   test('opening a shift goes to /sell', async ({ page }) => {
@@ -37,7 +37,8 @@ test.describe('POS route split', () => {
     await expect(page.getByText(/recorded/i)).toBeVisible({ timeout: 10_000 });
 
     await page.locator('div.fixed.inset-0').getByRole('button').first().click();
-    await page.getByRole('button', { name: 'Sales & refunds' }).click();
+    await openMore(page);
+    await page.getByRole('button', { name: 'Sales and refunds' }).click();
     await page.waitForURL('**/history', { timeout: 10_000 });
     await expect(page.getByRole('heading', { name: 'Sales' })).toBeVisible();
     await page.locator('h2', { hasText: 'Sales' }).locator('..').getByRole('button').first().click();
@@ -46,6 +47,7 @@ test.describe('POS route split', () => {
 
   test('cashier is kept off /settings and gated on /supervisor', async ({ page }) => {
     await loginAndOpenShift(page, 'aisha', '1234');
+    await openMore(page);
     await expect(page.getByRole('button', { name: 'POS settings' })).toHaveCount(0);
 
     await page.goto('/settings');
@@ -58,6 +60,7 @@ test.describe('POS route split', () => {
 
   test('admin reaches /settings and supervisor without a PIN gate', async ({ page }) => {
     await loginAndOpenShift(page, 'admin', '0000');
+    await openMore(page);
     await expect(page.getByRole('button', { name: 'POS settings' })).toBeVisible();
 
     await page.getByRole('button', { name: 'POS settings' }).click();
@@ -67,9 +70,22 @@ test.describe('POS route split', () => {
     await page.getByRole('button', { name: 'Close' }).click();
     await page.waitForURL('**/sell', { timeout: 10_000 });
 
-    await page.getByRole('button', { name: /Supervisor/ }).click();
+    await openMore(page);
+    await page.getByRole('button', { name: 'Manager dashboard' }).click();
     await page.waitForURL('**/supervisor', { timeout: 10_000 });
     await expect(page.getByText('Supervisor access')).toHaveCount(0);
+  });
+
+  test('a complete PIN shows the signing pulse until the next screen', async ({ page }) => {
+    await page.route('**/pos/auth/pin', async (route) => {
+      await new Promise((resolve) => setTimeout(resolve, 900));
+      await route.continue();
+    });
+    await page.goto('/login');
+    await page.getByPlaceholder('Username').fill('aisha');
+    await enterPin(page, '1234');
+    await expect(page.getByText('Signing you in')).toBeVisible();
+    await page.waitForURL('**/shift', { timeout: 15_000 });
   });
 
   test('signed-in /login and / redirect to /sell; sign out returns to /login', async ({ page }) => {
@@ -81,6 +97,7 @@ test.describe('POS route split', () => {
     await page.goto('/');
     await page.waitForURL('**/sell', { timeout: 10_000 });
 
+    await openMore(page);
     await page.getByRole('button', { name: 'Sign out' }).click();
     await page.waitForURL('**/login', { timeout: 10_000 });
     await expect(page.getByPlaceholder('Username')).toBeVisible();

@@ -7,7 +7,7 @@ import {
   Search, Plus, Minus, Trash2, Wifi, WifiOff, LogOut,
   ShoppingCart, UserPlus, Receipt as ReceiptIcon,
   Loader2, User, FileText, PauseCircle, PlayCircle, ShieldCheck, LifeBuoy,
-  Settings as Cog,
+  Settings as Cog, Menu, ChevronRight, Clock, Check,
 } from 'lucide-react';
 import { PosProduct, PosCustomer, PosSale, PosPayment, HeldSale, IssueType } from '@/lib/types';
 import { recordSale, saveHeld, deleteHeld, saveAssist } from '@/lib/db';
@@ -23,13 +23,16 @@ import { DiscountModal } from '@/components/discount-modal';
 import { HeldModal } from '@/components/held-modal';
 import { CustomerModal } from '@/components/customer-modal';
 import { RequireShift } from '@/components/route-guards';
+import { SellSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
 import { newAssistId, openCount } from '@/lib/assist';
-import { can, canFully } from '@/lib/permissions';
+import { can, canFully, roleLabel } from '@/lib/permissions';
+import { SalesOsBrand } from '@/components/brand';
+import { ThemeToggle } from '@/components/theme-provider';
 
 export default function SellPage() {
   return (
-    <RequireShift>
+    <RequireShift skeleton={<SellSkeleton />}>
       <SellScreen />
     </RequireShift>
   );
@@ -58,6 +61,8 @@ function SellScreen() {
   const [showMyRequests, setShowMyRequests] = useState(false);
   const [report, setReport] = useState<{ data: ShiftReport; kind: 'X' | 'Z' } | null>(null);
   const [showHeld, setShowHeld] = useState(false);
+  const [showMore, setShowMore] = useState(false);
+  const [mobileView, setMobileView] = useState<'products' | 'cart'>('products');
 
   const categories = useMemo(() => ['All', ...Array.from(new Set(catalog.map((p) => p.category)))], [catalog]);
   const visible = useMemo(() => catalog.filter((p) =>
@@ -207,137 +212,144 @@ function SellScreen() {
 
   if (!store || !cashier || !shift) return null;
 
-  return (
-    <div className="h-screen flex flex-col bg-[var(--color-bg)]">
-      <header className="flex items-center gap-3 px-4 h-14 bg-[var(--color-surface)] border-b border-[var(--color-line)] shrink-0">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="h-8 w-8 rounded-lg bg-[var(--color-brand)] grid place-items-center font-black text-white text-sm">FF</span>
-          <div className="min-w-0 hidden sm:block">
-            <p className="text-sm font-bold truncate">{store.storeName}</p>
-            <p className="text-[11px] text-[var(--color-ink-dim)]">{store.deviceLabel} · {store.storeType}</p>
-          </div>
-        </div>
+  const MenuAction = ({ icon: Icon, label, onClick, badge, tone }: { icon: typeof Clock; label: string; onClick: () => void; badge?: number; tone?: 'warn' }) => (
+    <button onClick={onClick} className={`flex h-11 w-full items-center gap-3 rounded-xl px-3 text-sm font-bold hover:bg-[var(--color-surface-2)] ${tone === 'warn' ? 'text-[var(--color-warn)]' : ''}`}>
+      <Icon size={16} className="shrink-0" /><span className="flex-1 text-left">{label}</span>
+      {!!badge && <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-black text-black">{badge}</span>}
+      <ChevronRight size={14} className="text-[var(--color-ink-dim)]" />
+    </button>
+  );
 
-        <div className="ml-auto flex items-center gap-2">
-          <button onClick={manualSync}
-            className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-lg text-xs font-bold border transition-colors ${
-              online ? 'border-[var(--color-line)] text-[var(--color-ink)]' : 'border-amber-500/40 bg-amber-500/10 text-amber-300'}`}>
-            {syncing ? <Loader2 size={14} className="animate-spin" /> : online ? <Wifi size={14} className="text-emerald-400" /> : <WifiOff size={14} />}
-            <span className="hidden sm:inline">{online ? 'Online' : 'Offline'}</span>
-            {pending > 0 && <span className="ml-0.5 rounded-full bg-amber-500 text-black px-1.5 text-[10px] font-black">{pending}</span>}
-          </button>
-          <div className="text-right hidden md:block">
-            <p className="text-[11px] text-[var(--color-ink-dim)]">Sales today</p>
-            <p className="text-sm font-black leading-none">{todayCount}</p>
+  return (
+    <div className="pos-shell flex h-[100dvh] flex-col bg-[var(--color-bg)]">
+      <header className="pos-header relative z-30 flex shrink-0 items-center gap-3 px-3 sm:px-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <SalesOsBrand compact />
+          <span className="h-8 w-px shrink-0 bg-[var(--color-line)]" />
+          <div className="min-w-0">
+            <p className="max-w-32 truncate text-sm font-extrabold tracking-[-0.01em] sm:max-w-72">{store.storeName}</p>
+            <p className="truncate text-xs text-[var(--color-ink-dim)]">{cashier.name.split(' (')[0]} <span className="mx-1 text-[var(--color-line-strong)]">/</span> Shift open</p>
           </div>
+        </div>
+        <div className="ml-auto flex items-center gap-1.5">
+          <button onClick={manualSync}
+            className={`top-action inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold ${
+              online ? 'border-[var(--color-line)] text-[var(--color-ink)]' : 'border-amber-500/40 bg-amber-500/10 text-[var(--color-warn)]'}`}>
+            {syncing ? <Loader2 size={14} className="animate-spin" /> : online ? <Wifi size={14} className="text-[var(--color-brand)]" /> : <WifiOff size={14} />}
+            <span>{online ? (pending > 0 ? 'Sync' : 'Online') : 'Offline'}</span>
+            {pending > 0 && <span className="ml-0.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-black text-black">{pending}</span>}
+          </button>
           <button onClick={() => setShowHelp(true)} title="Ask a supervisor for help"
-            className="h-9 w-9 grid place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-dim)] hover:text-[var(--color-ink)] relative">
-            <LifeBuoy size={15} />
-            {myOpen > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 rounded-full bg-amber-500 text-black text-[9px] font-black grid place-items-center">{myOpen}</span>}
+            className="top-action relative inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
+            <LifeBuoy size={15} /><span className="hidden sm:inline">Help</span>
+            {myOpen > 0 && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-amber-500 px-1 text-[9px] font-black text-black">{myOpen}</span>}
           </button>
-          <button onClick={() => setShowMyRequests(true)} title="My help requests"
-            className="h-9 px-2 rounded-lg border border-[var(--color-line)] text-[10px] font-black text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
-            {myResolved > 0 ? <span className="text-emerald-400">{myResolved} ✓</span> : 'REQ'}
+          <button onClick={() => router.push('/history')} title="Sales and refunds"
+            className="top-action hidden h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)] sm:inline-flex">
+            <ReceiptIcon size={15} /> Sales
           </button>
-          {(can(cashier.role, 'settings.manage') || can(cashier.role, 'user.manage')) && (
-            <button onClick={() => router.push('/settings')} title="POS settings"
-              className="h-9 w-9 grid place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
-              <Cog size={15} />
-            </button>
-          )}
-          <button onClick={openSupervisor} title="Supervisor — cashier performance & reconciliation"
-            className="h-9 w-9 grid place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-dim)] hover:text-[var(--color-ink)] relative">
-            <ShieldCheck size={15} />
-            {waitingAssists > 0 && <span className="absolute -top-1 -right-1 h-4 min-w-4 px-1 rounded-full bg-amber-500 text-black text-[9px] font-black grid place-items-center">{waitingAssists}</span>}
-          </button>
-          <button onClick={copyPayloadForCrm} title="Send sales to my CRM"
-            className="h-9 w-9 grid place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
-            <FileText size={15} />
-          </button>
-          <button onClick={() => router.push('/history')} title="Sales & refunds"
-            className="h-9 w-9 grid place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
-            <ReceiptIcon size={15} />
-          </button>
-          <button onClick={() => showReport('X')} title="X report"
-            className="h-9 px-2.5 rounded-lg border border-[var(--color-line)] text-[11px] font-black text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
-            X
-          </button>
-          <button onClick={() => showReport('Z')} title="Close shift (Z report)"
-            className="h-9 px-2.5 rounded-lg border border-amber-500/40 text-[11px] font-black text-amber-300 hover:bg-amber-500/10">
-            Z
-          </button>
-          <button onClick={() => { logout(); router.replace('/login'); }} title="Sign out"
-            className="h-9 w-9 grid place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
-            <LogOut size={15} />
+          <div className="hidden lg:block"><ThemeToggle compact /></div>
+          <button onClick={() => setShowMore((v) => !v)} aria-label="More actions" aria-expanded={showMore} className="top-action inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold">
+            <Menu size={16} /> <span className="hidden sm:inline">More</span>
           </button>
         </div>
+        {showMore && (
+          <div className="modal-shell absolute right-3 top-[4.2rem] z-50 w-72 space-y-1 rounded-[14px] p-2">
+            <p className="px-3 py-2 text-xs text-[var(--color-ink-dim)]">{todayCount} sale{todayCount === 1 ? '' : 's'} today <span className="mx-1 text-[var(--color-line-strong)]">/</span> {roleLabel(cashier.role)}</p>
+            <MenuAction icon={LifeBuoy} label="My help requests" onClick={() => { setShowMore(false); setShowMyRequests(true); }} badge={myOpen + myResolved} />
+            <MenuAction icon={ShieldCheck} label="Manager dashboard" onClick={() => { setShowMore(false); openSupervisor(); }} badge={waitingAssists} />
+            <MenuAction icon={ReceiptIcon} label="Sales and refunds" onClick={() => { setShowMore(false); router.push('/history'); }} />
+            <MenuAction icon={FileText} label="Send updates to CRM" onClick={() => { setShowMore(false); void copyPayloadForCrm(); }} />
+            <MenuAction icon={Clock} label="View shift totals" onClick={() => { setShowMore(false); showReport('X'); }} />
+            <MenuAction icon={Check} label="Close my shift" onClick={() => { setShowMore(false); showReport('Z'); }} tone="warn" />
+            {(can(cashier.role, 'settings.manage') || can(cashier.role, 'user.manage')) && (
+              <MenuAction icon={Cog} label="POS settings" onClick={() => { setShowMore(false); router.push('/settings'); }} />
+            )}
+            <div className="flex items-center justify-between border-t border-[var(--color-line)] px-3 pt-2 text-xs font-bold text-[var(--color-ink-dim)]"><span>Appearance</span><ThemeToggle compact /></div>
+            <MenuAction icon={LogOut} label="Sign out" onClick={() => { setShowMore(false); logout(); router.replace('/login'); }} />
+          </div>
+        )}
       </header>
 
-      <div className="flex-1 flex min-h-0">
-        <section className="flex-1 flex flex-col min-w-0">
-          <div className="p-3 flex gap-2 shrink-0">
+      <div className="flex min-h-0 flex-1">
+        <section className={`catalog-pane min-w-0 flex-1 flex-col ${mobileView === 'products' ? 'flex' : 'hidden'} md:flex`}>
+          <div className="flex items-end justify-between gap-3 px-4 pt-4 sm:px-5">
+            <div>
+              <h1 className="catalog-heading text-xl font-black sm:text-2xl">Choose products</h1>
+              <p className="mt-0.5 text-sm text-[var(--color-ink-dim)]">Tap an item to add it to this sale.</p>
+            </div>
+            <span className="shrink-0 pb-1 text-xs text-[var(--color-ink-dim)]">{visible.length} products</span>
+          </div>
+          <div className="flex shrink-0 gap-2 px-4 pb-3 pt-4 sm:px-5">
             <div className="relative flex-1">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-ink-dim)]" />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search product or SKU…"
-                className="w-full h-11 pl-10 pr-3 rounded-xl bg-[var(--color-surface)] border border-[var(--color-line)] text-sm outline-none focus:border-[var(--color-brand)]" />
+                className="search-control w-full rounded-[12px] pl-10 pr-3 text-sm outline-none" />
             </div>
           </div>
-          <div className="px-3 pb-2 flex gap-1.5 overflow-x-auto shrink-0">
+          <div className="category-strip flex shrink-0 gap-1 overflow-x-auto px-4 pb-3 sm:px-5">
             {categories.map((c) => (
-              <button key={c} onClick={() => setCategory(c)}
-                className={`px-3 h-8 rounded-lg text-xs font-bold whitespace-nowrap border ${
-                  category === c ? 'bg-[var(--color-brand)] border-[var(--color-brand)] text-white' : 'bg-[var(--color-surface)] border-[var(--color-line)] text-[var(--color-ink-dim)]'}`}>
+              <button key={c} onClick={() => setCategory(c)} data-active={category === c}
+                className="category-chip whitespace-nowrap rounded-[10px] px-3.5 text-xs font-bold">
                 {c}
               </button>
             ))}
           </div>
-          <div className="flex-1 overflow-y-auto px-3 pb-3">
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2.5">
+          <div className="flex-1 overflow-y-auto px-4 pb-5 sm:px-5">
+            <div className="product-grid grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-4">
               {visible.map((p) => {
                 const low = p.trackStock && typeof p.stock === 'number' && p.stock <= 0;
                 return (
                   <button key={p.id} onClick={() => addProduct(p)}
-                    className="tap text-left rounded-xl bg-[var(--color-surface)] border border-[var(--color-line)] p-3 hover:border-[var(--color-brand)] active:scale-[0.98] transition-all">
-                    <p className="text-sm font-bold leading-tight line-clamp-2 min-h-[2.5rem]">{p.name}</p>
-                    <p className="text-[11px] text-[var(--color-ink-dim)] mt-0.5">{p.unit}{p.trackStock && typeof p.stock === 'number' ? ` · ${p.stock} left` : ''}</p>
-                    <p className={`text-base font-black mt-1.5 ${low ? 'text-[var(--color-danger)]' : 'text-[var(--color-brand)]'}`}>{fmt(p.price)}</p>
+                    className="product-card tap relative p-3.5 text-left sm:p-4">
+                    <span className="product-add absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-[10px]"><Plus size={16} /></span>
+                    <p className="line-clamp-2 min-h-[2.6rem] pr-10 text-sm font-extrabold leading-[1.25] tracking-[-0.01em] sm:text-[15px]">{p.name}</p>
+                    <p className="mt-1.5 text-xs text-[var(--color-ink-dim)]">{p.unit}{p.trackStock && typeof p.stock === 'number' ? ` / ${p.stock} in stock` : ''}</p>
+                    <p className={`mt-2 text-lg font-black tracking-[-0.02em] ${low ? 'text-[var(--color-danger)]' : 'text-[var(--color-brand)]'}`}>{fmt(p.price)}</p>
                   </button>
                 );
               })}
-              {visible.length === 0 && <p className="col-span-full text-center text-sm text-[var(--color-ink-dim)] py-10">No products match.</p>}
+              {visible.length === 0 && <p className="col-span-full py-10 text-center text-sm text-[var(--color-ink-dim)]">No products match.</p>}
             </div>
           </div>
         </section>
 
-        <aside className="w-[340px] lg:w-[380px] shrink-0 bg-[var(--color-surface)] border-l border-[var(--color-line)] flex flex-col">
-          <div className="p-3 border-b border-[var(--color-line)] flex items-center justify-between">
-            <div className="flex items-center gap-2 text-sm font-bold"><ShoppingCart size={16} /> Cart <span className="text-[var(--color-ink-dim)] font-medium">({cartCount(lines)})</span></div>
-            {lines.length > 0 && <button onClick={clearCart} className="text-xs text-[var(--color-danger)] font-bold">Clear</button>}
+        <aside className={`cart-panel w-full shrink-0 flex-col md:flex md:w-[360px] xl:w-[410px] ${mobileView === 'cart' ? 'flex' : 'hidden'}`}>
+          <div className="flex items-center justify-between border-b border-[var(--color-line)] px-4 py-3.5">
+            <div className="flex items-center gap-2 text-base font-extrabold"><ShoppingCart size={18} /> Current sale <span className="text-xs font-semibold text-[var(--color-ink-dim)]">{cartCount(lines)} {cartCount(lines) === 1 ? 'item' : 'items'}</span></div>
+            {lines.length > 0 && <button onClick={() => { if (window.confirm('Remove every item from this cart?')) clearCart(); }} className="text-xs font-bold text-[var(--color-danger)]">Remove all</button>}
           </div>
 
           <button onClick={() => setShowCustomers(true)}
-            className="mx-3 mt-3 h-10 rounded-lg border border-dashed border-[var(--color-line)] text-xs font-bold text-[var(--color-ink-dim)] flex items-center justify-center gap-1.5 hover:border-[var(--color-brand)] hover:text-[var(--color-ink)]">
-            {customer ? <><User size={13} /> {customer.name}</> : <><UserPlus size={13} /> Add customer (optional)</>}
+            className="cart-customer mx-4 mt-4 flex items-center justify-between gap-2 rounded-[12px] px-3 text-xs font-extrabold">
+            {customer ? <><span className="inline-flex min-w-0 items-center gap-2"><User size={16} className="shrink-0 text-[var(--color-brand)]" /><span className="truncate">{customer.name}</span></span><span className="text-[var(--color-brand)]">Change</span></> : <><span className="inline-flex items-center gap-2"><UserPlus size={16} className="text-[var(--color-brand)]" /> Add customer details</span><ChevronRight size={16} className="text-[var(--color-brand)]" /></>}
           </button>
 
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {lines.length === 0 && <p className="text-center text-sm text-[var(--color-ink-dim)] py-10">Tap a product to start.</p>}
+          <div className="flex-1 space-y-2.5 overflow-y-auto p-4">
+            {lines.length === 0 && (
+              <div className="px-6 py-16 text-center">
+                <span className="mx-auto grid h-14 w-14 place-items-center rounded-[14px] border border-[var(--color-line)] bg-[var(--color-surface-2)]"><ShoppingCart size={24} className="text-[var(--color-ink-dim)]" /></span>
+                <p className="mt-4 text-base font-extrabold">No items yet</p>
+                <p className="mt-1 text-sm leading-5 text-[var(--color-ink-dim)]">Choose a product to begin this sale.</p>
+                <button onClick={() => setMobileView('products')} className="primary-action mt-5 h-11 rounded-[10px] px-5 text-sm font-black md:hidden">Choose products</button>
+              </div>
+            )}
             {lines.map((l) => (
-              <div key={l.product.id} className="rounded-xl bg-[var(--color-surface-2)] p-2.5 animate-pop">
+              <div key={l.product.id} className="cart-line animate-pop p-3">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-bold leading-tight">{l.product.name}</p>
-                  <button onClick={() => removeLine(l.product.id)} className="text-[var(--color-ink-dim)] hover:text-[var(--color-danger)] shrink-0"><Trash2 size={14} /></button>
+                  <div><p className="text-sm font-extrabold leading-tight">{l.product.name}</p><p className="mt-1 text-xs text-[var(--color-ink-dim)]">{fmt(l.product.price)} each</p></div>
+                  <button onClick={() => removeLine(l.product.id)} aria-label={`Remove ${l.product.name}`} className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] text-[var(--color-ink-dim)] hover:bg-red-500/10 hover:text-[var(--color-danger)]"><Trash2 size={15} /></button>
                 </div>
-                <div className="flex items-center justify-between mt-2">
+                <div className="mt-3 flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setQty(l.product.id, l.qty - 1)} className="h-8 w-8 grid place-items-center rounded-lg bg-[var(--color-surface)] border border-[var(--color-line)]"><Minus size={14} /></button>
-                    <input value={l.qty} onChange={(e) => setQty(l.product.id, Math.max(0, Number(e.target.value) || 0))}
-                      className="h-8 w-12 text-center rounded-lg bg-[var(--color-surface)] border border-[var(--color-line)] text-sm font-bold outline-none" />
-                    <button onClick={() => setQty(l.product.id, l.qty + 1)} className="h-8 w-8 grid place-items-center rounded-lg bg-[var(--color-surface)] border border-[var(--color-line)]"><Plus size={14} /></button>
+                    <button onClick={() => setQty(l.product.id, l.qty - 1)} aria-label={`Reduce ${l.product.name} quantity`} className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"><Minus size={14} /></button>
+                    <input value={l.qty} aria-label={`${l.product.name} quantity`} onChange={(e) => setQty(l.product.id, Math.max(0, Number(e.target.value) || 0))}
+                      className="h-9 w-12 rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)] text-center text-sm font-bold outline-none" />
+                    <button onClick={() => setQty(l.product.id, l.qty + 1)} aria-label={`Increase ${l.product.name} quantity`} className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"><Plus size={14} /></button>
                   </div>
                   <div className="text-right">
                     <button onClick={() => setDiscountFor(l.product.id)}
-                      className={`text-[10px] font-bold ${l.discount > 0 ? 'text-amber-400' : 'text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]'}`}>
+                      className={`text-[10px] font-bold ${l.discount > 0 ? 'text-[var(--color-warn)]' : 'text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]'}`}>
                       {l.discount > 0 ? `−${fmt(l.discount)} off` : '+ Discount'}
                     </button>
                     <p className="text-sm font-black">{fmt(lineTotal(l))}</p>
@@ -347,10 +359,10 @@ function SellScreen() {
             ))}
           </div>
 
-          <div className="p-3 border-t border-[var(--color-line)] space-y-2 shrink-0">
-            <div className="flex justify-between text-xs text-[var(--color-ink-dim)]"><span>Subtotal</span><span>{fmt(subtotal)}</span></div>
-            {totals.lineDiscount > 0 && <div className="flex justify-between text-xs text-amber-400"><span>Line discounts</span><span>−{fmt(totals.lineDiscount)}</span></div>}
-            {totals.orderDiscount > 0 && <div className="flex justify-between text-xs text-amber-400"><span>Cart discount</span><span>−{fmt(totals.orderDiscount)}</span></div>}
+          <div className="cart-footer shrink-0 space-y-2.5 p-4">
+            <div className="flex justify-between text-sm text-[var(--color-ink-dim)]"><span>Subtotal</span><span className="font-semibold text-[var(--color-ink)]">{fmt(subtotal)}</span></div>
+            {totals.lineDiscount > 0 && <div className="flex justify-between text-xs text-[var(--color-warn)]"><span>Line discounts</span><span>−{fmt(totals.lineDiscount)}</span></div>}
+            {totals.orderDiscount > 0 && <div className="flex justify-between text-xs text-[var(--color-warn)]"><span>Cart discount</span><span>−{fmt(totals.orderDiscount)}</span></div>}
             {lines.length > 0 && (
               <button onClick={() => setDiscountFor('cart')}
                 className="w-full text-left text-[10px] font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
@@ -364,28 +376,33 @@ function SellScreen() {
               </div>
             )}
             {needsDiscountApproval && (
-              <p className="text-[10px] font-bold text-amber-400 flex items-center gap-1">
+              <p className="flex items-center gap-1 text-[10px] font-bold text-[var(--color-warn)]">
                 <ShieldCheck size={11} /> {Math.round(cartDiscountPct)}% discount needs supervisor approval
               </p>
             )}
-            <div className="flex justify-between items-baseline"><span className="text-sm font-bold">Total</span><span className="text-2xl font-black text-[var(--color-brand)]">{fmt(total)}</span></div>
+            <div className="mt-2 flex items-end justify-between border-t border-[var(--color-line)] pt-3"><span className="pb-1 text-sm font-extrabold">Total</span><span className="text-3xl font-black tracking-[-0.04em] text-[var(--color-brand)]">{fmt(total)}</span></div>
             <div className="flex gap-2">
               <button disabled={lines.length === 0} onClick={holdCart}
-                className="flex-1 h-11 rounded-xl border border-[var(--color-line)] text-xs font-bold disabled:opacity-30 inline-flex items-center justify-center gap-1.5">
-                <PauseCircle size={14} /> Hold
+                className="secondary-action inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[10px] text-xs font-bold disabled:opacity-40">
+                <PauseCircle size={14} /> Hold cart
               </button>
-              <button onClick={() => setShowHeld(true)} disabled={held.length === 0}
-                className="flex-1 h-11 rounded-xl border border-[var(--color-line)] text-xs font-bold disabled:opacity-30 inline-flex items-center justify-center gap-1.5">
-                <PlayCircle size={14} /> Held {held.length > 0 && <span className="rounded-full bg-amber-500 text-black px-1.5 text-[10px] font-black">{held.length}</span>}
+              <button onClick={() => setShowHeld(true)}
+                className="secondary-action inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[10px] text-xs font-bold">
+                <PlayCircle size={14} /> Held carts {held.length > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-black text-black">{held.length}</span>}
               </button>
             </div>
             <button disabled={lines.length === 0} onClick={startCheckout}
-              className="w-full h-14 rounded-xl bg-[var(--color-brand)] text-white text-base font-black disabled:opacity-30 active:scale-[0.99] transition-transform">
+              className="primary-action h-14 w-full rounded-[11px] text-base font-black">
               Charge {total > 0 ? fmt(total) : ''}
             </button>
           </div>
         </aside>
       </div>
+
+      <nav className="mobile-switcher grid min-h-16 shrink-0 grid-cols-2 gap-2 border-t border-[var(--color-line)] p-2 pb-[max(.5rem,env(safe-area-inset-bottom))] md:hidden">
+        <button onClick={() => setMobileView('products')} className={`inline-flex items-center justify-center gap-2 rounded-[10px] text-sm font-black ${mobileView === 'products' ? 'bg-[var(--color-ink)] text-[var(--color-ink-inverse)]' : 'text-[var(--color-ink-dim)]'}`}><Search size={17} /> Products</button>
+        <button onClick={() => setMobileView('cart')} className={`inline-flex items-center justify-center gap-2 rounded-[10px] text-sm font-black ${mobileView === 'cart' ? 'bg-[var(--color-ink)] text-[var(--color-ink-inverse)]' : 'text-[var(--color-ink-dim)]'}`}><ShoppingCart size={17} /> Cart <span className={`rounded-full px-2 py-0.5 text-[11px] ${mobileView === 'cart' ? 'bg-[var(--color-ink-inverse)]/10' : 'bg-[var(--color-surface-2)] text-[var(--color-ink)]'}`}>{cartCount(lines)}</span></button>
+      </nav>
 
       {discountFor && (
         <DiscountModal
