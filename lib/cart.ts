@@ -6,11 +6,17 @@ export interface CartLine {
   product: PosProduct;
   qty: number;
   discount: number; // kobo, line-level
+  batchNumber: string;
+  saleUnit: string;
+  unitPrice: number; // kobo for the chosen batch and sale unit
 }
 
-export const lineTotal = (l: CartLine) => Math.max(0, l.product.price * l.qty - l.discount);
+export const lineKey = (l: Pick<CartLine, 'product' | 'batchNumber' | 'saleUnit'>) =>
+  `${l.product.id}:${l.batchNumber}:${l.saleUnit}`;
 
-export const cartSubtotal = (lines: CartLine[]) => lines.reduce((s, l) => s + l.product.price * l.qty, 0);
+export const lineTotal = (l: CartLine) => Math.max(0, (l.unitPrice || l.product.price) * l.qty - l.discount);
+
+export const cartSubtotal = (lines: CartLine[]) => lines.reduce((s, l) => s + (l.unitPrice || l.product.price) * l.qty, 0);
 export const cartDiscount = (lines: CartLine[]) => lines.reduce((s, l) => s + l.discount, 0);
 /** Net of line discounts, before any cart-level discount or tax. */
 export const cartNet = (lines: CartLine[]) => lines.reduce((s, l) => s + lineTotal(l), 0);
@@ -71,7 +77,7 @@ export const pctToAmount = (base: number, pct: number) => Math.round(base * (Mat
 export const amountToPct = (base: number, amount: number) => (base > 0 ? (amount / base) * 100 : 0);
 /** Largest discount % applied anywhere in the cart ??? drives the approval gate. */
 export function maxDiscountPctInCart(lines: CartLine[], orderDiscount: number): number {
-  const linePcts = lines.map((l) => amountToPct(l.product.price * l.qty, l.discount));
+  const linePcts = lines.map((l) => amountToPct((l.unitPrice || l.product.price) * l.qty, l.discount));
   const orderPct = amountToPct(cartNet(lines), orderDiscount);
   return Math.max(0, ...linePcts, orderPct);
 }
@@ -87,12 +93,14 @@ export const toSaleLines = (lines: CartLine[]): PosSaleLine[] =>
     productId: l.product.id,
     name: l.product.name,
     sku: l.product.sku,
-    unit: l.product.unit,
+    unit: l.saleUnit || l.product.unit,
     qty: l.qty,
-    unitPrice: l.product.price,
+    unitPrice: l.unitPrice || l.product.price,
     unitCost: l.product.cost,
     discount: l.discount,
     lineTotal: lineTotal(l),
+    batchNumber: l.batchNumber,
+    saleUnit: l.saleUnit,
   }));
 
 /** Client-generated, collision-free across tills. */

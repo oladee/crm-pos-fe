@@ -8,7 +8,7 @@ import {
 } from '@/lib/types';
 import { ensureSeeded } from '@/lib/seed';
 import {
-  applyRemoteStore, bindDevice, clearPinToken, createCashier, fetchCatalog, fetchStaff,
+  applyRemoteStore, bindDevice, clearPinToken, createCashier, fetchCatalog, fetchDeviceStatus, fetchStaff,
   resetCashierPin, type RemoteStore,
 } from '@/lib/remote';
 import {
@@ -62,6 +62,8 @@ type TillContextValue = {
   resetTillCashierPin: (staffId: string) => Promise<string>;
   manualSync: () => Promise<void>;
   copyPayloadForCrm: () => Promise<void>;
+  deviceAccess: 'unknown' | 'enroll' | 'passkey' | 'legacy';
+  markEnrolled: (credentialId: string) => Promise<void>;
 };
 
 const TillContext = createContext<TillContextValue | null>(null);
@@ -73,6 +75,7 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
   const [cashiers, setCashiers] = useState<Cashier[]>([]);
   const [cashier, setCashier] = useState<Cashier | null>(null);
   const [booting, setBooting] = useState(true);
+  const [deviceAccess, setDeviceAccess] = useState<'unknown' | 'enroll' | 'passkey' | 'legacy'>('unknown');
   const [shift, setShift] = useState<Shift | null>(null);
   const [allShifts, setAllShifts] = useState<Shift[]>([]);
   const [stockCounts, setStockCounts] = useState<Record<string, Record<string, number>>>({});
@@ -102,10 +105,23 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     (async () => {
-      const s = await ensureSeeded();
+      let s = await ensureSeeded();
+      let access: 'enroll' | 'passkey' | 'legacy' = s.credentialId ? 'passkey' : 'enroll';
+      try {
+        const status = await fetchDeviceStatus(s.deviceId);
+        if (!status.registered) {
+          access = 'enroll';
+          sessionStorage.removeItem(CASHIER_KEY);
+        } else {
+          access = status.passkey ? 'passkey' : 'legacy';
+        }
+      } catch {
+        access = s.credentialId ? 'passkey' : 'enroll';
+      }
+      setDeviceAccess(access);
       try {
         const hubId = s.hubId || s.storeId;
-        if (hubId) {
+        if (hubId && access !== 'enroll') {
           const [staff, remoteCatalog] = await Promise.all([
             fetchStaff(hubId, s.deviceId),
             fetchCatalog(hubId, s.deviceId),
@@ -125,7 +141,7 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
       setCashiers(csh);
       const savedId = sessionStorage.getItem(CASHIER_KEY);
       const restored = savedId ? csh.find((c) => c.id === savedId && c.isActive) : null;
-      if (restored) {
+      if (restored && access !== 'enroll') {
         setCashier(restored);
         const open = openShiftFor(shifts, restored.id);
         if (open) setShift(open);
@@ -162,6 +178,14 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
     }
     return { hasShift: false };
   }, []);
+
+  const markEnrolled = useCallback(async (credentialId: string) => {
+    if (!store) return;
+    const next = { ...store, credentialId };
+    await saveStore(next);
+    setStore(next);
+    setDeviceAccess('passkey');
+  }, [store]);
 
   const logout = useCallback(() => {
     setCashier(null);
@@ -376,12 +400,14 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
     login, logout, bindStore, openShift, closeShift, saveSettings,
     claimAssist, cancelAssist, resolveAssist, saveDayCount,
     createTillCashier, resetTillCashierPin, manualSync, copyPayloadForCrm,
+    deviceAccess, markEnrolled,
   }), [
     booting, store, catalog, customers, cashiers, cashier, shift, sales, held,
     allShifts, stockCounts, assists, online, pending, syncing, todayCount,
     actingSupervisor, refreshSyncState, login, logout, bindStore, openShift,
     closeShift, saveSettings, claimAssist, cancelAssist, resolveAssist,
     saveDayCount, createTillCashier, resetTillCashierPin, manualSync, copyPayloadForCrm,
+    deviceAccess, markEnrolled,
   ]);
 
   return <TillContext.Provider value={value}>{children}</TillContext.Provider>;

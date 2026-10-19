@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { X, Banknote, CreditCard, Smartphone, User, Check, Delete } from 'lucide-react';
 import { PosPayment, PaymentMethod } from '@/lib/types';
-import { paid, balanceDue, changeDue } from '@/lib/cart';
+import { paid, balanceDue } from '@/lib/cart';
 import { fmt, toKobo } from '@/lib/money';
 
 export function PaymentModal({
@@ -20,11 +20,11 @@ export function PaymentModal({
   const [entry, setEntry] = useState('');
 
   const due = balanceDue(payments, total);
-  const change = changeDue(payments, total);
   const entryKobo = toKobo(Number(entry) || 0);
+  const withinDue = (nairaText: string) => toKobo(Number(nairaText) || 0) <= due;
 
   const add = (amountKobo: number) => {
-    if (amountKobo <= 0) return;
+    if (amountKobo <= 0 || amountKobo > due) return;
     if (method === 'Credit' && !hasCustomer) { toast.error('Pick a customer for credit sales'); return; }
     setPayments((p) => [...p, { method, amount: amountKobo }]);
     setEntry('');
@@ -32,7 +32,9 @@ export function PaymentModal({
   const tap = (d: string) => {
     if (d === 'del') return setEntry((e) => e.slice(0, -1));
     if (d === '.' && entry.includes('.')) return;
-    setEntry((e) => (e + d).slice(0, 12));
+    const next = (entry + d).slice(0, 12);
+    if (!withinDue(next)) return;
+    setEntry(next);
   };
 
   const METHODS: { m: PaymentMethod; icon: typeof Banknote }[] = [
@@ -51,8 +53,8 @@ export function PaymentModal({
 
         <div className="p-4 space-y-3">
           <div className="rounded-xl bg-[var(--color-surface-2)] p-3 text-center">
-            <p className="text-[11px] text-[var(--color-ink-dim)]">{due > 0 ? 'Balance due' : 'Change'}</p>
-            <p className={`text-3xl font-black ${due > 0 ? 'text-[var(--color-ink)]' : 'text-[var(--color-brand)]'}`}>{fmt(due > 0 ? due : change)}</p>
+            <p className="text-[11px] text-[var(--color-ink-dim)]">Balance due</p>
+            <p className={`text-3xl font-black ${due > 0 ? 'text-[var(--color-ink)]' : 'text-[var(--color-brand)]'}`}>{fmt(due)}</p>
             <p className="text-[11px] text-[var(--color-ink-dim)] mt-0.5">Total {fmt(total)} · Paid {fmt(paid(payments))}</p>
           </div>
 
@@ -79,12 +81,15 @@ export function PaymentModal({
             ))}
           </div>
 
-          <input value={entry} onChange={(e) => setEntry(e.target.value.replace(/[^\d.]/g, ''))} placeholder="0.00" inputMode="decimal"
+          <input value={entry} onChange={(e) => {
+            const next = e.target.value.replace(/[^\d.]/g, '').slice(0, 12);
+            if (withinDue(next)) setEntry(next);
+          }} placeholder="0.00" inputMode="decimal"
             className="w-full h-12 px-3 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)] text-xl font-black text-center outline-none focus:border-[var(--color-brand)]" />
 
           <div className="grid grid-cols-4 gap-1.5">
             {quick.map((q) => (
-              <button key={q} onClick={() => setEntry(String(q))} className="h-9 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-line)] text-[11px] font-bold">{q.toLocaleString()}</button>
+              <button key={q} disabled={toKobo(q) > due} onClick={() => setEntry(String(q))} className="h-9 rounded-lg bg-[var(--color-surface-2)] border border-[var(--color-line)] text-[11px] font-bold disabled:opacity-30">{q.toLocaleString()}</button>
             ))}
           </div>
 
@@ -98,7 +103,7 @@ export function PaymentModal({
           </div>
 
           <div className="flex gap-2">
-            <button onClick={() => add(entryKobo)} disabled={entryKobo <= 0}
+            <button onClick={() => add(entryKobo)} disabled={entryKobo <= 0 || entryKobo > due}
               className="flex-1 h-12 rounded-xl border border-[var(--color-line)] font-bold text-sm disabled:opacity-30">Add payment</button>
             <button onClick={() => add(due)} disabled={due <= 0}
               className="flex-1 h-12 rounded-xl border border-[var(--color-line)] font-bold text-sm disabled:opacity-30">Exact {fmt(due)}</button>

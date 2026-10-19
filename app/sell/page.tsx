@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -12,7 +12,8 @@ import {
 import { PosProduct, PosCustomer, PosSale, PosPayment, HeldSale, IssueType } from '@/lib/types';
 import { recordSale, saveHeld, deleteHeld, saveAssist } from '@/lib/db';
 import { flushOutbox } from '@/lib/sync';
-import { CartLine, computeTotals, cartCount, lineTotal, toSaleLines, newSaleId, changeDue, pctToAmount, maxDiscountPctInCart } from '@/lib/cart';
+import { CartLine, computeTotals, cartCount, lineKey, lineTotal, toSaleLines, newSaleId, changeDue, pctToAmount, maxDiscountPctInCart } from '@/lib/cart';
+import { quoteSale } from '@/lib/remote';
 import { buildReport, ShiftReport } from '@/lib/shift';
 import { fmt } from '@/lib/money';
 import { Receipt } from '@/components/receipt';
@@ -22,6 +23,7 @@ import { PaymentModal } from '@/components/payment-modal';
 import { DiscountModal } from '@/components/discount-modal';
 import { HeldModal } from '@/components/held-modal';
 import { CustomerModal } from '@/components/customer-modal';
+import { BatchPicker } from '@/components/batch-picker';
 import { RequireShift } from '@/components/route-guards';
 import { SellSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
@@ -63,6 +65,9 @@ function SellScreen() {
   const [showHeld, setShowHeld] = useState(false);
   const [showMore, setShowMore] = useState(false);
   const [mobileView, setMobileView] = useState<'products' | 'cart'>('products');
+  const [picking, setPicking] = useState<PosProduct | null>(null);
+  const [quote, setQuote] = useState<{ subtotal: number; discount: number; tax: number; total: number } | null>(null);
+  const [quoting, setQuoting] = useState(false);
 
   const categories = useMemo(() => ['All', ...Array.from(new Set(catalog.map((p) => p.category)))], [catalog]);
   const visible = useMemo(() => catalog.filter((p) =>
@@ -74,23 +79,61 @@ function SellScreen() {
   const totals = computeTotals(lines, {
     orderDiscount, taxRatePct: store?.taxRatePct, taxInclusive: store?.taxInclusive,
   });
-  const { subtotal, discount, tax, total } = totals;
+  const payable = online && quote ? quote : totals;
+  const { subtotal, discount, tax, total } = payable;
+
+  useEffect(() => {
+    if (!online || !lines.length || !store?.deviceId) {
+      setQuote(null);
+      setQuoting(false);
+      return;
+    }
+    let cancelled = false;
+    setQuoting(true);
+    const handle = setTimeout(() => {
+      void quoteSale({
+        hubId: store.hubId || store.storeId,
+        deviceId: store.deviceId,
+        orderDiscount,
+        lines: lines.map((l) => ({
+          productId: l.product.id,
+          batchNumber: l.batchNumber,
+          saleUnit: l.saleUnit,
+          qty: l.qty,
+          discount: l.discount,
+        })),
+      }).then((next) => {
+        if (!cancelled) setQuote(next);
+      }).catch(() => {
+        if (!cancelled) setQuote(null);
+      }).finally(() => {
+        if (!cancelled) setQuoting(false);
+      });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [lines, orderDiscount, online, store?.deviceId, store?.hubId, store?.storeId]);
   const cartDiscountPct = maxDiscountPctInCart(lines, orderDiscount);
   const needsDiscountApproval = store ? cartDiscountPct > store.discountApprovalThresholdPct : false;
   const waitingAssists = openCount(assists);
   const myOpen = assists.filter((a) => a.cashierId === cashier?.id && (a.status === 'open' || a.status === 'in_progress')).length;
   const myResolved = assists.filter((a) => a.cashierId === cashier?.id && a.status === 'resolved').length;
 
-  const addProduct = (p: PosProduct) => {
+  const addBatchLine = (p: PosProduct, choice: { batchNumber: string; saleUnit: string; unitPrice: number }) => {
     setLines((cur) => {
-      const i = cur.findIndex((l) => l.product.id === p.id);
-      if (i >= 0) { const n = [...cur]; n[i] = { ...n[i], qty: n[i].qty + 1 }; return n; }
-      return [...cur, { product: p, qty: 1, discount: 0 }];
+      const key = lineKey({ product: p, batchNumber: choice.batchNumber, saleUnit: choice.saleUnit });
+      const i = cur.findIndex((l) => lineKey(l) === key);
+      if (i >= 0) { const n = [...cur]; n[i] = { ...n[i], qty: n[i].qty + 1, unitPrice: choice.unitPrice }; return n; }
+      return [...cur, { product: p, qty: 1, discount: 0, ...choice }];
     });
+    setPicking(null);
+    setMobileView('cart');
   };
-  const setQty = (id: string, qty: number) =>
-    setLines((cur) => qty <= 0 ? cur.filter((l) => l.product.id !== id) : cur.map((l) => l.product.id === id ? { ...l, qty } : l));
-  const removeLine = (id: string) => setLines((cur) => cur.filter((l) => l.product.id !== id));
+  const setQty = (key: string, qty: number) =>
+    setLines((cur) => qty <= 0 ? cur.filter((l) => lineKey(l) !== key) : cur.map((l) => lineKey(l) === key ? { ...l, qty } : l));
+  const removeLine = (key: string) => setLines((cur) => cur.filter((l) => lineKey(l) !== key));
   const clearCart = () => { setLines([]); setCustomer(null); setOrderDiscount(0); setDiscountApproved(false); };
 
   const applyDiscount = (targetId: string | 'cart', amount: number) => {
@@ -100,8 +143,8 @@ function SellScreen() {
       setOrderDiscount(Math.min(Math.max(0, amount), pctToAmount(base, cap)));
     } else {
       setLines((cur) => cur.map((l) => {
-        if (l.product.id !== targetId) return l;
-        const base = l.product.price * l.qty;
+        if (lineKey(l) !== targetId) return l;
+        const base = (l.unitPrice || l.product.price) * l.qty;
         return { ...l, discount: Math.min(Math.max(0, amount), pctToAmount(base, cap)) };
       }));
     }
@@ -188,7 +231,7 @@ function SellScreen() {
     const h: HeldSale = {
       id: `hold-${Date.now().toString(36)}`,
       label: customer?.name || `${cartCount(lines)} items · ${fmt(total)}`,
-      lines: lines.map((l) => ({ productId: l.product.id, qty: l.qty, discount: l.discount })),
+      lines: lines.map((l) => ({ productId: l.product.id, qty: l.qty, discount: l.discount, batchNumber: l.batchNumber, saleUnit: l.saleUnit, unitPrice: l.unitPrice })),
       customerId: customer?.id, customerName: customer?.name,
       cashierId: cashier.id, createdAt: new Date().toISOString(),
     };
@@ -200,7 +243,13 @@ function SellScreen() {
 
   const resumeCart = async (h: HeldSale) => {
     const restored: CartLine[] = h.lines
-      .map((l) => { const p = catalog.find((x) => x.id === l.productId); return p ? { product: p, qty: l.qty, discount: l.discount } : null; })
+      .map((l) => {
+        const p = catalog.find((x) => x.id === l.productId);
+        if (!p || !l.batchNumber || !l.saleUnit) return null;
+        const batch = p.batches?.find((b) => b.batchNumber === l.batchNumber);
+        const unitPrice = l.unitPrice || (l.saleUnit === 'Carton' ? batch?.cartonPrice : batch?.unitPrice) || p.price;
+        return { product: p, qty: l.qty, discount: l.discount, batchNumber: l.batchNumber, saleUnit: l.saleUnit, unitPrice };
+      })
       .filter((x): x is CartLine => x !== null);
     setLines(restored);
     setCustomer(h.customerId ? customers.find((c) => c.id === h.customerId) || null : null);
@@ -298,14 +347,15 @@ function SellScreen() {
           <div className="flex-1 overflow-y-auto px-4 pb-5 sm:px-5">
             <div className="product-grid grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-4">
               {visible.map((p) => {
-                const low = p.trackStock && typeof p.stock === 'number' && p.stock <= 0;
+                const batches = (p.batches || []).filter((b) => b.quantityRemaining > 0);
+                const low = batches.length === 0;
                 return (
-                  <button key={p.id} onClick={() => addProduct(p)}
+                  <button key={p.id} onClick={() => batches.length ? setPicking(p) : toast.error('This product has no open batch')}
                     className="product-card tap relative p-3.5 text-left sm:p-4">
                     <span className="product-add absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-[10px]"><Plus size={16} /></span>
                     <p className="line-clamp-2 min-h-[2.6rem] pr-10 text-sm font-extrabold leading-[1.25] tracking-[-0.01em] sm:text-[15px]">{p.name}</p>
-                    <p className="mt-1.5 text-xs text-[var(--color-ink-dim)]">{p.unit}{p.trackStock && typeof p.stock === 'number' ? ` / ${p.stock} in stock` : ''}</p>
-                    <p className={`mt-2 text-lg font-black tracking-[-0.02em] ${low ? 'text-[var(--color-danger)]' : 'text-[var(--color-brand)]'}`}>{fmt(p.price)}</p>
+                    <p className="mt-1.5 text-xs text-[var(--color-ink-dim)]">{batches.length ? `${batches.length} batch${batches.length === 1 ? '' : 'es'}` : 'No open batch'}</p>
+                    <p className={`mt-2 text-lg font-black tracking-[-0.02em] ${low ? 'text-[var(--color-danger)]' : 'text-[var(--color-brand)]'}`}>{batches.length ? `from ${fmt(p.price)}` : '—'}</p>
                   </button>
                 );
               })}
@@ -334,21 +384,26 @@ function SellScreen() {
                 <button onClick={() => setMobileView('products')} className="primary-action mt-5 h-11 rounded-[10px] px-5 text-sm font-black md:hidden">Choose products</button>
               </div>
             )}
-            {lines.map((l) => (
-              <div key={l.product.id} className="cart-line animate-pop p-3">
+            {lines.map((l) => {
+              const key = lineKey(l);
+              return (
+              <div key={key} className="cart-line animate-pop p-3">
                 <div className="flex items-start justify-between gap-2">
-                  <div><p className="text-sm font-extrabold leading-tight">{l.product.name}</p><p className="mt-1 text-xs text-[var(--color-ink-dim)]">{fmt(l.product.price)} each</p></div>
-                  <button onClick={() => removeLine(l.product.id)} aria-label={`Remove ${l.product.name}`} className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] text-[var(--color-ink-dim)] hover:bg-red-500/10 hover:text-[var(--color-danger)]"><Trash2 size={15} /></button>
+                  <div>
+                    <p className="text-sm font-extrabold leading-tight">{l.product.name}</p>
+                    <p className="mt-1 text-xs text-[var(--color-ink-dim)]">Batch {l.batchNumber} · {fmt(l.unitPrice)} / {l.saleUnit}</p>
+                  </div>
+                  <button onClick={() => removeLine(key)} aria-label={`Remove ${l.product.name}`} className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] text-[var(--color-ink-dim)] hover:bg-red-500/10 hover:text-[var(--color-danger)]"><Trash2 size={15} /></button>
                 </div>
                 <div className="mt-3 flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setQty(l.product.id, l.qty - 1)} aria-label={`Reduce ${l.product.name} quantity`} className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"><Minus size={14} /></button>
-                    <input value={l.qty} aria-label={`${l.product.name} quantity`} onChange={(e) => setQty(l.product.id, Math.max(0, Number(e.target.value) || 0))}
+                    <button onClick={() => setQty(key, l.qty - 1)} aria-label={`Reduce ${l.product.name} quantity`} className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"><Minus size={14} /></button>
+                    <input value={l.qty} aria-label={`${l.product.name} quantity`} onChange={(e) => setQty(key, Math.max(0, Number(e.target.value) || 0))}
                       className="h-9 w-12 rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)] text-center text-sm font-bold outline-none" />
-                    <button onClick={() => setQty(l.product.id, l.qty + 1)} aria-label={`Increase ${l.product.name} quantity`} className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"><Plus size={14} /></button>
+                    <button onClick={() => setQty(key, l.qty + 1)} aria-label={`Increase ${l.product.name} quantity`} className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"><Plus size={14} /></button>
                   </div>
                   <div className="text-right">
-                    <button onClick={() => setDiscountFor(l.product.id)}
+                    <button onClick={() => setDiscountFor(key)}
                       className={`text-[10px] font-bold ${l.discount > 0 ? 'text-[var(--color-warn)]' : 'text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]'}`}>
                       {l.discount > 0 ? `−${fmt(l.discount)} off` : '+ Discount'}
                     </button>
@@ -356,7 +411,8 @@ function SellScreen() {
                   </div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="cart-footer shrink-0 space-y-2.5 p-4">
@@ -391,9 +447,9 @@ function SellScreen() {
                 <PlayCircle size={14} /> Held carts {held.length > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-black text-black">{held.length}</span>}
               </button>
             </div>
-            <button disabled={lines.length === 0} onClick={startCheckout}
-              className="primary-action h-14 w-full rounded-[11px] text-base font-black">
-              Charge {total > 0 ? fmt(total) : ''}
+            <button disabled={lines.length === 0 || (online && (quoting || !quote))} onClick={startCheckout}
+              className="primary-action h-14 w-full rounded-[11px] text-base font-black disabled:opacity-40">
+              {online && quoting ? 'Checking price…' : online && lines.length > 0 && !quote ? 'Price check failed' : `Charge ${total > 0 ? fmt(total) : ''}`}
             </button>
           </div>
         </aside>
@@ -406,9 +462,9 @@ function SellScreen() {
 
       {discountFor && (
         <DiscountModal
-          label={discountFor === 'cart' ? 'Cart discount' : lines.find((l) => l.product.id === discountFor)?.product.name || ''}
-          base={discountFor === 'cart' ? lines.reduce((a, l) => a + lineTotal(l), 0) : (() => { const l = lines.find((x) => x.product.id === discountFor); return l ? l.product.price * l.qty : 0; })()}
-          current={discountFor === 'cart' ? orderDiscount : (lines.find((l) => l.product.id === discountFor)?.discount || 0)}
+          label={discountFor === 'cart' ? 'Cart discount' : lines.find((l) => lineKey(l) === discountFor)?.product.name || ''}
+          base={discountFor === 'cart' ? lines.reduce((a, l) => a + lineTotal(l), 0) : (() => { const l = lines.find((x) => lineKey(x) === discountFor); return l ? (l.unitPrice || l.product.price) * l.qty : 0; })()}
+          current={discountFor === 'cart' ? orderDiscount : (lines.find((l) => lineKey(l) === discountFor)?.discount || 0)}
           maxPct={store.maxDiscountPct ?? 50}
           approvalPct={store.discountApprovalThresholdPct ?? 10}
           onClose={() => setDiscountFor(null)}
@@ -420,7 +476,16 @@ function SellScreen() {
           onCancel={() => setDiscountGate(false)} onVerify={authoriseDiscount} />
       )}
       {showPay && <PaymentModal total={total} onClose={() => setShowPay(false)} onConfirm={completeSale} hasCustomer={!!customer} />}
-      {showCustomers && <CustomerModal customers={customers} onPick={(c) => { setCustomer(c); setShowCustomers(false); }} onClear={() => { setCustomer(null); setShowCustomers(false); }} onClose={() => setShowCustomers(false)} />}
+      {showCustomers && (
+        <CustomerModal
+          hubId={store.hubId || store.storeId}
+          customers={customers}
+          onPick={(c) => { setCustomer(c); setShowCustomers(false); }}
+          onClear={() => { setCustomer(null); setShowCustomers(false); }}
+          onClose={() => setShowCustomers(false)}
+        />
+      )}
+      {picking && <BatchPicker product={picking} onClose={() => setPicking(null)} onAdd={(choice) => addBatchLine(picking, choice)} />}
       {lastSale && <Receipt sale={lastSale} store={store} onClose={() => setLastSale(null)} />}
 
       {report && (

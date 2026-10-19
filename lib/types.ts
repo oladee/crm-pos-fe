@@ -25,6 +25,8 @@ export interface StoreProfile {
   planExpiry?: string;
   deviceId: string;
   deviceLabel: string;
+  /** Passkey credential id after this browser has been enrolled. */
+  credentialId?: string;
   /** Allow selling below zero stock while offline (business decision per store). */
   allowNegativeStock: boolean;
   setupComplete: boolean;
@@ -44,17 +46,26 @@ export interface StoreProfile {
   maxDiscountPct: number;
 }
 
+export interface PosBatch {
+  batchNumber: string;
+  quantityRemaining: number;
+  unitPrice: number;   // kobo, per kg or per stored unit
+  cartonPrice: number; // kobo
+  cartonWeight: number;
+}
+
 export interface PosProduct {
   id: string;
   sku: string;
   name: string;
   category: string;
-  price: number;      // kobo
+  price: number;      // kobo, lowest open batch price for the tile
   cost?: number;      // kobo
   unit: string;
   stock?: number;
   trackStock: boolean;
   isActive: boolean;
+  batches?: PosBatch[];
 }
 
 export interface PosCustomer {
@@ -82,6 +93,8 @@ export interface PosSaleLine {
   unitCost?: number;  // kobo
   discount: number;   // kobo, line-level
   lineTotal: number;  // kobo
+  batchNumber?: string;
+  saleUnit?: string;
 }
 
 export interface PosPayment {
@@ -209,7 +222,7 @@ export interface StockCount {
 export interface HeldSale {
   id: string;
   label: string;
-  lines: { productId: string; qty: number; discount: number }[];
+  lines: { productId: string; qty: number; discount: number; batchNumber?: string; saleUnit?: string; unitPrice?: number }[];
   customerId?: string;
   customerName?: string;
   cashierId: string;

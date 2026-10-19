@@ -13,6 +13,9 @@ export type RemoteStore = {
   storeType: StoreType;
   location_type?: string;
   ownership_type?: string | null;
+  taxRatePct?: number;
+  taxInclusive?: boolean;
+  maxDiscountPct?: number;
 };
 
 export type RemoteStaff = {
@@ -100,6 +103,44 @@ export async function bindDevice(input: { deviceId: string; hubId: string; label
   return sendJson('/pos/devices/bind', 'POST', input, false);
 }
 
+export async function fetchDeviceStatus(deviceId: string) {
+  return getJson<{ registered: boolean; passkey: boolean }>(
+    `/pos/devices/status?deviceId=${encodeURIComponent(deviceId)}`,
+  );
+}
+
+export async function registrationOptions(deviceId: string, code: string) {
+  return sendJson<{ options: Record<string, unknown> }>(
+    '/pos/devices/register/options',
+    'POST',
+    { deviceId, code },
+    false,
+  );
+}
+
+export async function enrollDevice(input: {
+  deviceId: string;
+  code: string;
+  label?: string;
+  response: unknown;
+}) {
+  return sendJson<{ deviceId: string; hubId: string; credentialId: string }>(
+    '/pos/devices/enroll',
+    'POST',
+    input,
+    false,
+  );
+}
+
+export async function authenticationOptions(deviceId: string) {
+  return sendJson<{ legacy: boolean; options?: Record<string, unknown> }>(
+    '/pos/devices/authenticate/options',
+    'POST',
+    { deviceId },
+    false,
+  );
+}
+
 function toCashier(staff: RemoteStaff, pin = ''): Cashier {
   return {
     id: staff.id,
@@ -138,6 +179,7 @@ export async function verifyPin(input: {
   pin: string;
   deviceId?: string;
   deviceLabel?: string;
+  assertion?: unknown;
 }): Promise<{ staff: Cashier; location?: RemoteStore }> {
   const body = await sendJson<{ staff: RemoteStaff; token: string; location?: RemoteStore }>(
     '/pos/auth/pin',
@@ -167,7 +209,39 @@ export function applyRemoteStore(store: StoreProfile, remote: RemoteStore): Stor
     storeName: remote.name,
     storeType: remote.storeType || store.storeType,
     setupComplete: true,
+    taxRatePct: remote.taxRatePct ?? store.taxRatePct,
+    taxInclusive: remote.taxInclusive ?? store.taxInclusive,
+    maxDiscountPct: remote.maxDiscountPct ?? store.maxDiscountPct,
   };
+}
+
+export async function quoteSale(input: {
+  hubId: string;
+  deviceId: string;
+  orderDiscount?: number;
+  lines: Array<{ productId: string; batchNumber: string; saleUnit: string; qty: number; discount: number }>;
+}) {
+  return sendJson<{
+    subtotal: number;
+    discount: number;
+    tax: number;
+    taxRatePct: number;
+    taxInclusive: boolean;
+    total: number;
+  }>('/pos/sales/quote', 'POST', input);
+}
+
+export async function searchPosCustomers(q: string) {
+  const res = await getJson<{ data: Array<{ id: string; name: string; phone?: string }> }>(
+    `/pos/customers?q=${encodeURIComponent(q)}`,
+    true,
+  );
+  return (res.data ?? []).map((row) => ({ id: row.id, name: row.name, phone: row.phone }));
+}
+
+export async function createPosCustomer(input: { name: string; phone: string }) {
+  const res = await sendJson<{ data: { id: string; name: string; phone?: string } }>('/pos/customers', 'POST', input);
+  return { id: res.data.id, name: res.data.name, phone: res.data.phone };
 }
 
 function saleHubId(payload: Record<string, unknown>, fallback?: string) {

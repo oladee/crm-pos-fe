@@ -4,26 +4,51 @@ import { useState } from 'react';
 import { toast } from 'sonner';
 import { Delete } from 'lucide-react';
 import { Cashier, StoreProfile } from '@/lib/types';
-import { verifyPin, type RemoteStore } from '@/lib/remote';
+import { startAuthentication } from '@simplewebauthn/browser';
+import { authenticationOptions, verifyPin, type RemoteStore } from '@/lib/remote';
 import { SalesOsBrand } from '@/components/brand';
 import { ThemeToggle } from '@/components/theme-provider';
 
 export function PinLogin({
   store,
+  passkey = false,
   onLogin,
   onBindStore,
 }: {
   store: StoreProfile | null;
+  passkey?: boolean;
   onLogin: (c: Cashier) => void | Promise<void>;
   onBindStore?: (remote: RemoteStore) => Promise<void> | void;
 }) {
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
+  const [assertion, setAssertion] = useState<unknown | undefined>(passkey ? undefined : null);
+  const ready = !passkey || assertion !== undefined;
+
+  const unlock = async () => {
+    if (!store || busy) return;
+    setBusy(true);
+    try {
+      const challenge = await authenticationOptions(store.deviceId);
+      if (challenge.legacy || !challenge.options) {
+        setAssertion(null);
+        return;
+      }
+      const signed = await startAuthentication({ optionsJSON: challenge.options as never });
+      setAssertion(signed);
+    } catch (err) {
+      const name = err && typeof err === 'object' && 'name' in err ? String(err.name) : '';
+      if (name === 'NotAllowedError') toast.error('The passkey prompt was cancelled');
+      else toast.error(err instanceof Error ? err.message : 'This till could not be unlocked');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (value: string) => {
     const ident = username.trim().toLowerCase();
-    if (!ident || busy) return;
+    if (!ident || busy || !ready || !store) return;
     if (!/^\d{4}$/.test(value)) return;
     setBusy(true);
     try {
@@ -32,8 +57,9 @@ export function PinLogin({
         username: isEmail ? undefined : ident,
         email: isEmail ? ident : undefined,
         pin: value,
-        deviceId: store?.deviceId,
-        deviceLabel: store?.deviceLabel,
+        deviceId: store.deviceId,
+        deviceLabel: store.deviceLabel,
+        assertion: assertion ?? undefined,
       });
       if (verified.location) await onBindStore?.(verified.location);
       await onLogin(verified.staff);
@@ -41,6 +67,7 @@ export function PinLogin({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Wrong username or PIN');
       setPin('');
+      if (passkey) setAssertion(undefined);
       setBusy(false);
     }
   };
@@ -69,9 +96,15 @@ export function PinLogin({
 
         <div className="modal-shell w-full rounded-[16px] p-4 sm:p-5">
           <div className="mb-4">
-            <h2 className="text-lg font-black tracking-[-0.02em]">Sign in</h2>
-            <p className="mt-1 text-sm text-[var(--color-ink-dim)]">Enter your username, then your PIN.</p>
+            <h2 className="text-lg font-black tracking-[-0.02em]">{ready ? 'Sign in' : 'Unlock this till'}</h2>
+            <p className="mt-1 text-sm text-[var(--color-ink-dim)]">{ready ? 'Enter your username, then your PIN.' : 'Confirm this device with its passkey, then sign in with your PIN.'}</p>
           </div>
+          {!ready && (
+            <button type="button" disabled={busy} onClick={() => void unlock()} className="primary-action h-14 w-full rounded-[11px] text-base font-black disabled:opacity-40">
+              {busy ? 'Waiting for the passkey…' : 'Use this device’s passkey'}
+            </button>
+          )}
+          {ready && <>
           <label className="mb-4 block">
             <span className="sr-only">Username</span>
             <input
@@ -99,10 +132,11 @@ export function PinLogin({
               </button>
             ))}
           </div>
+          </>}
         </div>
       </div>
 
-      {busy && (
+      {busy && ready && (
         <div className="signing-overlay fixed inset-0 z-50 grid place-items-center bg-[var(--color-backdrop)]" role="status" aria-live="polite" aria-busy="true">
           <div className="text-center">
             <div className="logo-pulse mx-auto w-[220px]">
