@@ -88,11 +88,17 @@ function SellScreen() {
       setQuoting(false);
       return;
     }
+    const hubId = store.hubId || store.storeId;
+    if (!hubId) {
+      setQuote(null);
+      setQuoting(false);
+      return;
+    }
     let cancelled = false;
     setQuoting(true);
     const handle = setTimeout(() => {
       void quoteSale({
-        hubId: store.hubId || store.storeId,
+        hubId,
         deviceId: store.deviceId,
         orderDiscount,
         lines: lines.map((l) => ({
