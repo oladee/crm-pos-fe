@@ -7,19 +7,20 @@ import {
   Search, Plus, Minus, Trash2, Wifi, WifiOff, LogOut,
   ShoppingCart, UserPlus, Receipt as ReceiptIcon,
   Loader2, User, FileText, PauseCircle, PlayCircle, ShieldCheck, LifeBuoy,
-  Settings as Cog, Menu, ChevronRight, Clock, Check,
+  Settings as Cog, Menu, ChevronRight, Clock, Check, Smartphone,
 } from 'lucide-react';
 import { PosProduct, PosCustomer, PosSale, PosPayment, HeldSale, IssueType } from '@/lib/types';
 import { recordSale, saveHeld, deleteHeld, saveAssist } from '@/lib/db';
 import { flushOutbox } from '@/lib/sync';
 import { CartLine, computeTotals, cartCount, lineKey, lineTotal, toSaleLines, newSaleId, changeDue, pctToAmount, maxDiscountPctInCart } from '@/lib/cart';
-import { quoteSale } from '@/lib/remote';
+import { quoteSale, startPosTransfer, listPosTransfers, refreshPosTransfer, cancelPosTransfer, type PosTransfer } from '@/lib/remote';
 import { buildReport, ShiftReport } from '@/lib/shift';
 import { fmt } from '@/lib/money';
 import { Receipt } from '@/components/receipt';
 import { ReportModal, PinGate } from '@/components/shift-panels';
 import { RequestHelpModal, MyRequests } from '@/components/assist-panels';
 import { PaymentModal } from '@/components/payment-modal';
+import { TransferPanel, TransferQueue, saleFromTransfer } from '@/components/transfer-panel';
 import { DiscountModal } from '@/components/discount-modal';
 import { HeldModal } from '@/components/held-modal';
 import { CustomerModal } from '@/components/customer-modal';
@@ -68,6 +69,10 @@ function SellScreen() {
   const [picking, setPicking] = useState<PosProduct | null>(null);
   const [quote, setQuote] = useState<{ subtotal: number; discount: number; tax: number; total: number } | null>(null);
   const [quoting, setQuoting] = useState(false);
+  const [transfers, setTransfers] = useState<PosTransfer[]>([]);
+  const [activeTransfer, setActiveTransfer] = useState<PosTransfer | null>(null);
+  const [showTransfers, setShowTransfers] = useState(false);
+  const [checkingTransfer, setCheckingTransfer] = useState(false);
 
   const categories = useMemo(() => ['All', ...Array.from(new Set(catalog.map((p) => p.category)))], [catalog]);
   const visible = useMemo(() => catalog.filter((p) =>
@@ -170,6 +175,139 @@ function SellScreen() {
     setShowPay(true);
     toast.success(`Discount authorised by ${sup.name.split(' (')[0]}`);
   };
+
+  const rememberTransfer = (transfer: PosTransfer) => {
+    setTransfers((current) => {
+      const next = [transfer, ...current.filter((row) => row.clientSaleId !== transfer.clientSaleId)];
+      return next;
+    });
+  };
+
+  const settleTransfer = async (transfer: PosTransfer) => {
+    if (transfer.status !== 'paid') {
+      rememberTransfer(transfer);
+      setActiveTransfer((current) => current?.clientSaleId === transfer.clientSaleId ? transfer : current);
+      return;
+    }
+    const sale = saleFromTransfer(transfer);
+    if (sale && !sales.some((row) => row.id === sale.id)) {
+      const recorded = { ...sale, payments: [{ method: 'Transfer' as const, amount: transfer.cartTotalKobo, reference: transfer.checkoutId }], syncState: 'pending' as const };
+      await recordSale(recorded);
+      await refreshSyncState();
+      void flushOutbox().then(refreshSyncState);
+    }
+    setTransfers((current) => current.filter((row) => row.clientSaleId !== transfer.clientSaleId));
+    setActiveTransfer(null);
+    toast.success('Transfer received');
+  };
+
+  const startTransfer = async () => {
+    if (!store || !cashier || !online) return;
+    const hubId = store.hubId || store.storeId;
+    if (!hubId) { toast.error('This till has no location yet'); return; }
+    const sale: PosSale = {
+      id: newSaleId(store.deviceId),
+      deviceId: store.deviceId,
+      storeId: hubId,
+      hubId,
+      cashierId: cashier.id,
+      cashierName: cashier.name,
+      lines: toSaleLines(lines),
+      subtotal, discount, total,
+      orderDiscount: orderDiscount || undefined,
+      tax: tax || undefined,
+      taxRatePct: store.taxRatePct || undefined,
+      payments: [{ method: 'Transfer', amount: total }],
+      change: 0,
+      customerId: customer?.id,
+      customerName: customer?.name,
+      status: 'completed',
+      createdAt: new Date().toISOString(),
+      syncState: 'pending',
+      shiftId: shift?.id,
+    };
+    try {
+      const transfer = await startPosTransfer({
+        clientSaleId: sale.id,
+        hubId,
+        deviceId: store.deviceId,
+        cashierName: cashier.name,
+        customerId: customer?.id,
+        customerName: customer?.name,
+        shiftId: shift?.id,
+        orderDiscount,
+        lines: sale.lines.map((line) => ({
+          productId: line.productId,
+          batchNumber: line.batchNumber,
+          saleUnit: line.saleUnit,
+          qty: line.qty,
+          discount: line.discount,
+        })),
+        posSale: sale,
+      });
+      rememberTransfer({ ...transfer, sale: { ...transfer.sale, posSale: sale } });
+      setActiveTransfer({ ...transfer, sale: { ...transfer.sale, posSale: sale } });
+      setShowPay(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not start the transfer');
+      throw err;
+    }
+  };
+
+  const pullTransfer = async (transfer: PosTransfer, quiet: boolean) => {
+    try {
+      const next = await refreshPosTransfer(transfer.clientSaleId);
+      const merged = { ...next, sale: next.sale?.posSale ? next.sale : transfer.sale };
+      await settleTransfer(merged);
+    } catch (err) {
+      if (!quiet) toast.error(err instanceof Error ? err.message : 'Could not check this transfer');
+    }
+  };
+
+  const checkTransfer = async (transfer: PosTransfer) => {
+    setCheckingTransfer(true);
+    try {
+      await pullTransfer(transfer, false);
+    } finally {
+      setCheckingTransfer(false);
+    }
+  };
+
+  const continueFromTransfer = () => {
+    clearCart();
+    setActiveTransfer(null);
+    setShowPay(false);
+    toast.success('Next sale is ready. The transfer stays in Transfers.');
+  };
+
+  const cancelTransfer = async (transfer: PosTransfer) => {
+    try {
+      await cancelPosTransfer(transfer.clientSaleId);
+      setTransfers((current) => current.filter((row) => row.clientSaleId !== transfer.clientSaleId));
+      setActiveTransfer(null);
+      toast.success('Transfer cancelled');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not cancel this transfer');
+    }
+  };
+
+  useEffect(() => {
+    if (!online || !store?.deviceId) return;
+    let cancelled = false;
+    void listPosTransfers(store.deviceId).then((rows) => {
+      if (!cancelled) setTransfers(rows);
+    }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [online, store?.deviceId]);
+
+  useEffect(() => {
+    const waiting = transfers.filter((transfer) => transfer.status === 'awaiting');
+    if (!online || waiting.length === 0) return;
+    const handle = setInterval(() => {
+      waiting.forEach((transfer) => { void pullTransfer(transfer, true); });
+    }, 120_000);
+    return () => clearInterval(handle);
+  }, [online, transfers]);
 
   const completeSale = async (payments: PosPayment[]) => {
     if (!store || !cashier) return;
@@ -293,6 +431,15 @@ function SellScreen() {
             {syncing ? <Loader2 size={14} className="animate-spin" /> : online ? <Wifi size={14} className="text-[var(--color-brand)]" /> : <WifiOff size={14} />}
             <span>{online ? (pending > 0 ? 'Sync' : 'Online') : 'Offline'}</span>
             {pending > 0 && <span className="ml-0.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-black text-black">{pending}</span>}
+          </button>
+          <button onClick={() => setShowTransfers(true)} title="Bank transfers waiting for payment"
+            className="top-action relative inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
+            <Smartphone size={15} /><span className="hidden sm:inline">Transfers</span>
+            {transfers.some((transfer) => transfer.status === 'awaiting') && (
+              <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-amber-500 px-1 text-[9px] font-black text-black">
+                {transfers.filter((transfer) => transfer.status === 'awaiting').length}
+              </span>
+            )}
           </button>
           <button onClick={() => setShowHelp(true)} title="Ask a supervisor for help"
             className="top-action relative inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
@@ -481,7 +628,33 @@ function SellScreen() {
           note={`This cart carries a ${Math.round(cartDiscountPct)}% discount, above the ${store.discountApprovalThresholdPct}% limit. A supervisor must authorise it.`}
           onCancel={() => setDiscountGate(false)} onVerify={authoriseDiscount} />
       )}
-      {showPay && <PaymentModal total={total} onClose={() => setShowPay(false)} onConfirm={completeSale} hasCustomer={!!customer} />}
+      {showPay && (
+        <PaymentModal
+          total={total}
+          online={online}
+          onClose={() => setShowPay(false)}
+          onConfirm={completeSale}
+          hasCustomer={!!customer}
+          onStartTransfer={startTransfer}
+        />
+      )}
+      {activeTransfer && (
+        <TransferPanel
+          transfer={activeTransfer}
+          busy={checkingTransfer}
+          onCheck={() => void checkTransfer(activeTransfer)}
+          onContinue={continueFromTransfer}
+          onCancel={() => void cancelTransfer(activeTransfer)}
+          onClose={() => setActiveTransfer(null)}
+        />
+      )}
+      {showTransfers && (
+        <TransferQueue
+          transfers={transfers}
+          onClose={() => setShowTransfers(false)}
+          onOpen={(transfer) => { setShowTransfers(false); setActiveTransfer(transfer); }}
+        />
+      )}
       {showCustomers && (
         <CustomerModal
           hubId={store.hubId || store.storeId}

@@ -215,6 +215,40 @@ export function applyRemoteStore(store: StoreProfile, remote: RemoteStore): Stor
   };
 }
 
+export type PosTransfer = {
+  clientSaleId: string;
+  checkoutId: string;
+  status: 'awaiting' | 'paid' | 'cancelled' | 'expired';
+  bankName: string;
+  accountName: string;
+  accountNumber: string;
+  payableKobo: number;
+  cartTotalKobo: number;
+  currency: string;
+  expiresAt: string | null;
+  sale: Record<string, unknown>;
+};
+
+export async function startPosTransfer(body: Record<string, unknown>) {
+  return sendJson<PosTransfer>('/pos/payments/transfers', 'POST', body);
+}
+
+export async function listPosTransfers(deviceId: string) {
+  const res = await getJson<{ data: PosTransfer[] }>(
+    `/pos/payments/transfers?deviceId=${encodeURIComponent(deviceId)}`,
+    true,
+  );
+  return res.data ?? [];
+}
+
+export async function refreshPosTransfer(clientSaleId: string) {
+  return getJson<PosTransfer>(`/pos/payments/transfers/${encodeURIComponent(clientSaleId)}?refresh=1`, true);
+}
+
+export async function cancelPosTransfer(clientSaleId: string) {
+  return sendJson<PosTransfer>(`/pos/payments/transfers/${encodeURIComponent(clientSaleId)}/cancel`, 'POST', {});
+}
+
 export async function quoteSale(input: {
   hubId: string;
   deviceId: string;

@@ -2,22 +2,25 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { X, Banknote, CreditCard, Smartphone, User, Check, Delete } from 'lucide-react';
+import { X, Banknote, Smartphone, User, Check, Delete } from 'lucide-react';
 import { PosPayment, PaymentMethod } from '@/lib/types';
 import { paid, balanceDue } from '@/lib/cart';
 import { fmt, toKobo } from '@/lib/money';
 
 export function PaymentModal({
-  total, onClose, onConfirm, hasCustomer,
+  total, onClose, onConfirm, hasCustomer, online, onStartTransfer,
 }: {
   total: number;
   onClose: () => void;
   onConfirm: (p: PosPayment[]) => void;
   hasCustomer: boolean;
+  online: boolean;
+  onStartTransfer: () => Promise<void>;
 }) {
   const [payments, setPayments] = useState<PosPayment[]>([]);
   const [method, setMethod] = useState<PaymentMethod>('Cash');
   const [entry, setEntry] = useState('');
+  const [starting, setStarting] = useState(false);
 
   const due = balanceDue(payments, total);
   const entryKobo = toKobo(Number(entry) || 0);
@@ -38,8 +41,7 @@ export function PaymentModal({
   };
 
   const METHODS: { m: PaymentMethod; icon: typeof Banknote }[] = [
-    { m: 'Cash', icon: Banknote }, { m: 'Transfer', icon: Smartphone },
-    { m: 'Card', icon: CreditCard }, { m: 'Credit', icon: User },
+    { m: 'Cash', icon: Banknote }, { m: 'Transfer', icon: Smartphone }, { m: 'Credit', icon: User },
   ];
   const quick = [1000, 2000, 5000, 10000];
 
@@ -71,7 +73,7 @@ export function PaymentModal({
             </div>
           )}
 
-          <div className="grid grid-cols-4 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             {METHODS.map(({ m, icon: Icon }) => (
               <button key={m} onClick={() => setMethod(m)}
                 className={`h-11 rounded-lg text-[11px] font-bold border flex flex-col items-center justify-center gap-0.5 ${
@@ -81,6 +83,28 @@ export function PaymentModal({
             ))}
           </div>
 
+          {method === 'Transfer' ? (
+            <div className="space-y-3">
+              <p className="text-sm leading-6 text-[var(--color-ink-dim)]">
+                {online
+                  ? 'The customer transfers the full balance. You can start the next sale while this one is confirmed.'
+                  : 'Bank transfer needs a connection. Cash and store credit still work offline.'}
+              </p>
+              {payments.length > 0 && <p className="text-xs font-bold text-[var(--color-warn)]">Remove the other payments before starting a transfer.</p>}
+              <button
+                type="button"
+                disabled={!online || starting || due <= 0 || payments.length > 0}
+                onClick={() => {
+                  setStarting(true);
+                  void onStartTransfer().catch(() => setStarting(false));
+                }}
+                className="primary-action h-12 w-full rounded-[11px] text-sm font-black disabled:opacity-40"
+              >
+                {starting ? 'Getting the account…' : `Transfer ${fmt(due)}`}
+              </button>
+            </div>
+          ) : (
+          <>
           <input value={entry} onChange={(e) => {
             const next = e.target.value.replace(/[^\d.]/g, '').slice(0, 12);
             if (withinDue(next)) setEntry(next);
@@ -109,10 +133,15 @@ export function PaymentModal({
               className="flex-1 h-12 rounded-xl border border-[var(--color-line)] font-bold text-sm disabled:opacity-30">Exact {fmt(due)}</button>
           </div>
 
+          </>
+          )}
+
+          {method !== 'Transfer' && (
           <button onClick={() => onConfirm(payments)} disabled={due > 0 || payments.length === 0}
             className="w-full h-14 rounded-xl bg-[var(--color-brand)] text-white text-base font-black disabled:opacity-30 flex items-center justify-center gap-2">
             <Check size={18} /> Complete sale
           </button>
+          )}
         </div>
       </div>
     </div>
