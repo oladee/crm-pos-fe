@@ -20,11 +20,9 @@ const REGISTRATION_STEPS = [
 export function EnrollTill({
   store,
   onEnrolled,
-  onBindStore,
 }: {
   store: StoreProfile;
-  onEnrolled: (credentialId: string, label?: string) => Promise<void> | void;
-  onBindStore?: (remote: RemoteStore) => Promise<void> | void;
+  onEnrolled: (credentialId: string, label: string | undefined, location: RemoteStore) => Promise<void> | void;
 }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -58,9 +56,10 @@ export function EnrollTill({
         response,
       });
       setStep(3);
-      await onEnrolled(enrolled.credentialId, enrolled.label);
       const locations = await fetchStores(store.deviceId);
-      if (locations[0]) await onBindStore?.(locations[0]);
+      const location = locations.find((item) => item.id === enrolled.hubId);
+      if (!location) throw new Error('The till was registered, but its location could not be loaded. Please reload to finish setup.');
+      await onEnrolled(enrolled.credentialId, enrolled.label, location);
       toast.success('This till is registered');
     } catch (err) {
       const name = err && typeof err === 'object' && 'name' in err ? String(err.name) : '';

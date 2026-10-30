@@ -63,7 +63,7 @@ type TillContextValue = {
   manualSync: () => Promise<void>;
   copyPayloadForCrm: () => Promise<void>;
   deviceAccess: 'unknown' | 'enroll' | 'passkey' | 'legacy';
-  markEnrolled: (credentialId: string, label?: string) => Promise<void>;
+  markEnrolled: (credentialId: string, label: string | undefined, location: RemoteStore) => Promise<void>;
 };
 
 const TillContext = createContext<TillContextValue | null>(null);
@@ -112,6 +112,9 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
         if (!status.registered) {
           access = 'enroll';
           sessionStorage.removeItem(CASHIER_KEY);
+          clearPinToken();
+          delete s.credentialId;
+          await saveStore(s);
         } else {
           access = status.passkey ? 'passkey' : 'legacy';
         }
@@ -179,11 +182,33 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
     return { hasShift: false };
   }, []);
 
-  const markEnrolled = useCallback(async (credentialId: string, label?: string) => {
+  const markEnrolled = useCallback(async (credentialId: string, label: string | undefined, location: RemoteStore) => {
     if (!store) return;
-    const next = { ...store, credentialId, deviceLabel: label || store.deviceLabel };
+    const next = { ...applyRemoteStore(store, location), credentialId, deviceLabel: label || store.deviceLabel };
     await saveStore(next);
+    // Previous cashier sessions and cached staff must not survive enrollment.
+    clearPinToken();
+    sessionStorage.removeItem(CASHIER_KEY);
+    setCashier(null);
+    setShift(null);
+    setActingSupervisor(null);
+    await replaceCashiers([]);
+    await replaceCatalog([]);
+    setCashiers([]);
+    setCatalog([]);
     setStore(next);
+    try {
+      const [staff, items] = await Promise.all([
+        fetchStaff(location.id, next.deviceId),
+        fetchCatalog(location.id, next.deviceId),
+      ]);
+      await replaceCashiers(staff);
+      await replaceCatalog(items);
+      setCashiers(staff);
+      setCatalog(items);
+    } catch {
+      toast.error('Till registered. Reload to retry loading staff and products for this location.');
+    }
     setDeviceAccess('passkey');
   }, [store]);
 

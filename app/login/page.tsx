@@ -20,7 +20,7 @@ export default function LoginPage() {
   return (
     <BootGate skeleton={<LoginSkeleton />}>
       {store && deviceAccess === 'enroll' ? (
-        <EnrollTill store={store} onEnrolled={markEnrolled} onBindStore={bindStore} />
+        <EnrollTill store={store} onEnrolled={markEnrolled} />
       ) : (
         <PinLogin
           store={store}
