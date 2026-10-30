@@ -200,7 +200,7 @@ export async function recordSale(sale: PosSale): Promise<void> {
   return new Promise((resolve, reject) => {
     const t = db.transaction([STORES.sales, STORES.outbox, STORES.catalog], 'readwrite');
     t.objectStore(STORES.sales).put(sale);
-    t.objectStore(STORES.outbox).put({
+    if (sale.syncState !== 'synced') t.objectStore(STORES.outbox).put({
       id: `ob-${sale.id}`,
       type: 'sale',
       refId: sale.id,

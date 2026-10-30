@@ -218,7 +218,14 @@ export function applyRemoteStore(store: StoreProfile, remote: RemoteStore): Stor
 export type PosTransfer = {
   clientSaleId: string;
   checkoutId: string;
-  status: 'awaiting' | 'paid' | 'cancelled' | 'expired';
+  status: 'initializing' | 'awaiting' | 'paid' | 'cancelled' | 'expired' | 'review';
+  provider: 'bachs' | 'squad';
+  feeKobo: number | null;
+  reservationState: 'held' | 'consumed' | 'released' | 'needs_review';
+  reconciliationReason: string | null;
+  canConfirmReceived: boolean;
+  canCancel: boolean;
+  confirmationSource: string | null;
   bankName: string;
   accountName: string;
   accountNumber: string;
@@ -228,6 +235,17 @@ export type PosTransfer = {
   expiresAt: string | null;
   sale: Record<string, unknown>;
 };
+
+export type PaymentProviderOption = { id: 'bachs' | 'squad'; name: string };
+export function getPaymentOptions() {
+  return getJson<{ providers: PaymentProviderOption[]; manualConfirmationEnabled: boolean }>('/pos/payments/options', true);
+}
+export function confirmPosTransferReceived(id: string) {
+  return sendJson<PosTransfer>(`/pos/payments/transfers/${encodeURIComponent(id)}/confirm-received`, 'POST', {});
+}
+export function submitPosSale(sale: Record<string, unknown>) {
+  return sendJson('/pos/sales', 'POST', { ...sale, clientSaleId: sale.id });
+}
 
 export async function startPosTransfer(body: Record<string, unknown>) {
   return sendJson<PosTransfer>('/pos/payments/transfers', 'POST', body);

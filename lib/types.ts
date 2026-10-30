@@ -62,7 +62,9 @@ export interface PosProduct {
   price: number;      // kobo, lowest open batch price for the tile
   cost?: number;      // kobo
   unit: string;
-  stock?: number;
+  stock?: number; // available stock
+  onHandStock?: number;
+  reservedStock?: number;
   trackStock: boolean;
   isActive: boolean;
   batches?: PosBatch[];

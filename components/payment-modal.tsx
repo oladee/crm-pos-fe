@@ -1,26 +1,42 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { X, Banknote, Smartphone, User, Check, Delete } from 'lucide-react';
 import { PosPayment, PaymentMethod } from '@/lib/types';
 import { paid, balanceDue } from '@/lib/cart';
 import { fmt, toKobo } from '@/lib/money';
+import { getPaymentOptions, type PaymentProviderOption } from '@/lib/remote';
 
 export function PaymentModal({
   total, onClose, onConfirm, hasCustomer, online, onStartTransfer,
 }: {
   total: number;
   onClose: () => void;
-  onConfirm: (p: PosPayment[]) => void;
+  onConfirm: (p: PosPayment[]) => Promise<void>;
   hasCustomer: boolean;
   online: boolean;
-  onStartTransfer: () => Promise<void>;
+  onStartTransfer: (provider: 'bachs' | 'squad') => Promise<void>;
 }) {
   const [payments, setPayments] = useState<PosPayment[]>([]);
   const [method, setMethod] = useState<PaymentMethod>('Cash');
   const [entry, setEntry] = useState('');
   const [starting, setStarting] = useState(false);
+  const [providers, setProviders] = useState<PaymentProviderOption[]>([]);
+  const [provider, setProvider] = useState<'bachs' | 'squad' | ''>('');
+  const [providerError, setProviderError] = useState('');
+  const [providerLoading, setProviderLoading] = useState(true);
+  const [retryOptions, setRetryOptions] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setProviderLoading(true);
+    setProviderError('');
+    getPaymentOptions().then(options => {
+      if (active) { setProviders(options.providers); setProvider(options.providers[0]?.id || ''); }
+    }).catch(() => { if (active) setProviderError('Could not load payment providers.'); })
+      .finally(() => { if (active) setProviderLoading(false); });
+    return () => { active = false; };
+  }, [retryOptions]);
 
   const due = balanceDue(payments, total);
   const entryKobo = toKobo(Number(entry) || 0);
@@ -50,7 +66,7 @@ export function PaymentModal({
       <div className="modal-shell w-full max-w-md overflow-hidden rounded-[16px]">
         <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between">
           <h2 className="font-black">Payment</h2>
-          <button onClick={onClose} className="text-[var(--color-ink-dim)]"><X size={20} /></button>
+          <button disabled={starting} onClick={onClose} className="text-[var(--color-ink-dim)]"><X size={20} /></button>
         </div>
 
         <div className="p-4 space-y-3">
@@ -88,15 +104,24 @@ export function PaymentModal({
               <p className="text-sm leading-6 text-[var(--color-ink-dim)]">
                 {online
                   ? 'The customer transfers the full balance. You can start the next sale while this one is confirmed.'
-                  : 'Bank transfer needs a connection. Cash and store credit still work offline.'}
+                  : 'Connect to the internet to validate stock and take payment.'}
               </p>
+              {providerLoading && <p role="status" className="text-sm">Loading payment providers…</p>}
+              {providerError && <p role="alert" className="text-sm text-[var(--color-danger)]">{providerError} <button type="button" className="underline" onClick={() => setRetryOptions(value => value + 1)}>Retry</button></p>}
+              {!providerLoading && !providerError && providers.length === 0 && <p className="text-sm text-[var(--color-ink-dim)]">Bank transfer is not enabled. Ask an administrator to configure a payment provider.</p>}
+              {providers.length > 0 && <label className="block text-sm font-bold">Payment provider
+                <select value={provider} disabled={starting} onChange={event => setProvider(event.target.value as 'bachs' | 'squad')} className="field-control mt-2 h-11 w-full rounded-[10px] px-3">
+                  {providers.map(option => <option key={option.id} value={option.id}>{option.name}</option>)}
+                </select>
+              </label>}
+              <p className="text-xs leading-5 text-[var(--color-ink-dim)]">The customer pays provider charges. Review the exact total before sharing account details.</p>
               {payments.length > 0 && <p className="text-xs font-bold text-[var(--color-warn)]">Remove the other payments before starting a transfer.</p>}
               <button
                 type="button"
-                disabled={!online || starting || due <= 0 || payments.length > 0}
+                disabled={!online || starting || !provider || providerLoading || !!providerError || due <= 0 || payments.length > 0}
                 onClick={() => {
                   setStarting(true);
-                  void onStartTransfer().catch(() => setStarting(false));
+                  if (provider) void onStartTransfer(provider).finally(() => setStarting(false)).catch(() => undefined);
                 }}
                 className="primary-action h-12 w-full rounded-[11px] text-sm font-black disabled:opacity-40"
               >
@@ -137,9 +162,12 @@ export function PaymentModal({
           )}
 
           {method !== 'Transfer' && (
-          <button onClick={() => onConfirm(payments)} disabled={due > 0 || payments.length === 0}
+          <button onClick={() => {
+            setStarting(true);
+            void onConfirm(payments).catch(error => toast.error(error instanceof Error ? error.message : 'Could not complete sale')).finally(() => setStarting(false));
+          }} disabled={!online || starting || due > 0 || payments.length === 0}
             className="w-full h-14 rounded-xl bg-[var(--color-brand)] text-white text-base font-black disabled:opacity-30 flex items-center justify-center gap-2">
-            <Check size={18} /> Complete sale
+            <Check size={18} /> {starting ? 'Validating stock…' : 'Complete sale'}
           </button>
           )}
         </div>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -10,10 +10,10 @@ import {
   Settings as Cog, Menu, ChevronRight, Clock, Check, Smartphone,
 } from 'lucide-react';
 import { PosProduct, PosCustomer, PosSale, PosPayment, HeldSale, IssueType } from '@/lib/types';
-import { recordSale, saveHeld, deleteHeld, saveAssist } from '@/lib/db';
+import { recordSale, saveHeld, deleteHeld, saveAssist, replaceCatalog } from '@/lib/db';
 import { flushOutbox } from '@/lib/sync';
 import { CartLine, computeTotals, cartCount, lineKey, lineTotal, toSaleLines, newSaleId, changeDue, pctToAmount, maxDiscountPctInCart } from '@/lib/cart';
-import { quoteSale, startPosTransfer, listPosTransfers, refreshPosTransfer, cancelPosTransfer, type PosTransfer } from '@/lib/remote';
+import { fetchCatalog, quoteSale, startPosTransfer, listPosTransfers, refreshPosTransfer, cancelPosTransfer, confirmPosTransferReceived, submitPosSale, type PosTransfer } from '@/lib/remote';
 import { buildReport, ShiftReport } from '@/lib/shift';
 import { fmt } from '@/lib/money';
 import { Receipt } from '@/components/receipt';
@@ -44,10 +44,25 @@ export default function SellPage() {
 function SellScreen() {
   const router = useRouter();
   const {
-    store, catalog, customers, cashiers, cashier, shift, sales, held, assists,
+    store, catalog, setCatalog, customers, cashiers, cashier, shift, sales, held, assists,
     online, pending, syncing, todayCount, refreshSyncState,
     logout, closeShift, setActingSupervisor, manualSync, copyPayloadForCrm,
   } = useTill();
+
+  const refreshAvailability = useCallback(async () => {
+    const hubId = store?.hubId || store?.storeId;
+    if (!online || !hubId || !store?.deviceId) return;
+    try {
+      const items = await fetchCatalog(hubId, store.deviceId);
+      await replaceCatalog(items); setCatalog(items);
+    } catch { /* Cached quantities are advisory; checkout still requires server validation. */ }
+  }, [online, store?.hubId, store?.storeId, store?.deviceId, setCatalog]);
+  useEffect(() => {
+    void refreshAvailability();
+    const timer = window.setInterval(() => void refreshAvailability(), 30_000);
+    window.addEventListener('focus', refreshAvailability);
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', refreshAvailability); };
+  }, [refreshAvailability]);
 
   const [lines, setLines] = useState<CartLine[]>([]);
   const [search, setSearch] = useState('');
@@ -191,21 +206,28 @@ function SellScreen() {
     }
     const sale = saleFromTransfer(transfer);
     if (sale && !sales.some((row) => row.id === sale.id)) {
-      const recorded = { ...sale, payments: [{ method: 'Transfer' as const, amount: transfer.cartTotalKobo, reference: transfer.checkoutId }], syncState: 'pending' as const };
+      const recorded = { ...sale, payments: [{ method: 'Transfer' as const, amount: transfer.cartTotalKobo, reference: transfer.checkoutId }], syncState: 'synced' as const };
       await recordSale(recorded);
       await refreshSyncState();
       void flushOutbox().then(refreshSyncState);
     }
     setTransfers((current) => current.filter((row) => row.clientSaleId !== transfer.clientSaleId));
     setActiveTransfer(null);
+    await refreshAvailability();
     toast.success('Transfer received');
   };
 
-  const startTransfer = async () => {
+  const startTransfer = async (provider: 'bachs' | 'squad') => {
     if (!store || !cashier || !online) return;
     const hubId = store.hubId || store.storeId;
     if (!hubId) { toast.error('This till has no location yet'); return; }
-    const sale: PosSale = {
+    const attemptKey = 'pos.transferAttempt.' + store.deviceId;
+    let saved: { sale: PosSale; provider: 'bachs' | 'squad' } | null = null;
+    try { saved = JSON.parse(sessionStorage.getItem(attemptKey) || 'null'); } catch { /* Ignore a malformed local draft. */ }
+    if (saved && (saved.provider !== provider || JSON.stringify(saved.sale.lines) !== JSON.stringify(toSaleLines(lines)))) {
+      throw new Error('A previous transfer request has an unknown result. Check Transfers before starting a different payment. Retry the same cart and provider to recover it.');
+    }
+    const sale: PosSale = saved?.sale || {
       id: newSaleId(store.deviceId),
       deviceId: store.deviceId,
       storeId: hubId,
@@ -226,8 +248,10 @@ function SellScreen() {
       syncState: 'pending',
       shiftId: shift?.id,
     };
+    sessionStorage.setItem(attemptKey, JSON.stringify({ sale, provider }));
     try {
       const transfer = await startPosTransfer({
+        provider,
         clientSaleId: sale.id,
         hubId,
         deviceId: store.deviceId,
@@ -245,6 +269,10 @@ function SellScreen() {
         })),
         posSale: sale,
       });
+      sessionStorage.removeItem(attemptKey);
+      if (transfer.status === 'cancelled') throw new Error(transfer.reconciliationReason || 'Transfer could not be started. No stock is held.');
+      clearCart();
+      await refreshAvailability();
       rememberTransfer({ ...transfer, sale: { ...transfer.sale, posSale: sale } });
       setActiveTransfer({ ...transfer, sale: { ...transfer.sale, posSale: sale } });
       setShowPay(false);
@@ -274,7 +302,6 @@ function SellScreen() {
   };
 
   const continueFromTransfer = () => {
-    clearCart();
     setActiveTransfer(null);
     setShowPay(false);
     toast.success('Next sale is ready. The transfer stays in Transfers.');
@@ -285,6 +312,7 @@ function SellScreen() {
       await cancelPosTransfer(transfer.clientSaleId);
       setTransfers((current) => current.filter((row) => row.clientSaleId !== transfer.clientSaleId));
       setActiveTransfer(null);
+      await refreshAvailability();
       toast.success('Transfer cancelled');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not cancel this transfer');
@@ -295,13 +323,20 @@ function SellScreen() {
     if (!online || !store?.deviceId) return;
     let cancelled = false;
     void listPosTransfers(store.deviceId).then((rows) => {
-      if (!cancelled) setTransfers(rows);
+      if (!cancelled) {
+        setTransfers(rows);
+        const attemptKey = 'pos.transferAttempt.' + store.deviceId;
+        try {
+          const attempt = JSON.parse(sessionStorage.getItem(attemptKey) || 'null');
+          if (attempt && rows.some(row => row.clientSaleId === attempt.sale?.id)) sessionStorage.removeItem(attemptKey);
+        } catch { /* A corrupt draft never changes server payment state. */ }
+      }
     }).catch(() => undefined);
     return () => { cancelled = true; };
   }, [online, store?.deviceId]);
 
   useEffect(() => {
-    const waiting = transfers.filter((transfer) => transfer.status === 'awaiting');
+    const waiting = transfers.filter((transfer) => ['initializing', 'awaiting', 'expired', 'review'].includes(transfer.status));
     if (!online || waiting.length === 0) return;
     const handle = setInterval(() => {
       waiting.forEach((transfer) => { void pullTransfer(transfer, true); });
@@ -311,6 +346,7 @@ function SellScreen() {
 
   const completeSale = async (payments: PosPayment[]) => {
     if (!store || !cashier) return;
+    if (!online) throw new Error('Connect to the internet to validate available stock.');
     const sale: PosSale = {
       id: newSaleId(store.deviceId),
       deviceId: store.deviceId,
@@ -332,11 +368,14 @@ function SellScreen() {
       syncState: 'pending',
       shiftId: shift?.id,
     };
+    await submitPosSale(sale as unknown as Record<string, unknown>);
+    sale.syncState = 'synced';
     await recordSale(sale);
     setLastSale(sale);
     setShowPay(false);
     clearCart();
     await refreshSyncState();
+    await refreshAvailability();
     toast.success(`Sale ${fmt(total)} recorded${navigator.onLine ? '' : ' — will sync when back online'}`);
     void flushOutbox().then(refreshSyncState);
   };
@@ -435,9 +474,9 @@ function SellScreen() {
           <button onClick={() => setShowTransfers(true)} title="Bank transfers waiting for payment"
             className="top-action relative inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
             <Smartphone size={15} /><span className="hidden sm:inline">Transfers</span>
-            {transfers.some((transfer) => transfer.status === 'awaiting') && (
+            {transfers.some((transfer) => ['initializing', 'awaiting', 'expired', 'review'].includes(transfer.status)) && (
               <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-amber-500 px-1 text-[9px] font-black text-black">
-                {transfers.filter((transfer) => transfer.status === 'awaiting').length}
+                {transfers.filter((transfer) => ['initializing', 'awaiting', 'expired', 'review'].includes(transfer.status)).length}
               </span>
             )}
           </button>
@@ -642,6 +681,12 @@ function SellScreen() {
         <TransferPanel
           transfer={activeTransfer}
           busy={checkingTransfer}
+          onConfirmReceived={async () => {
+            setCheckingTransfer(true);
+            try { await settleTransfer(await confirmPosTransferReceived(activeTransfer.clientSaleId)); }
+            catch (error) { toast.error(error instanceof Error ? error.message : 'Could not confirm payment'); throw error; }
+            finally { setCheckingTransfer(false); }
+          }}
           onCheck={() => void checkTransfer(activeTransfer)}
           onContinue={continueFromTransfer}
           onCancel={() => void cancelTransfer(activeTransfer)}
