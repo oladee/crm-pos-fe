@@ -8,12 +8,14 @@ const payment = {
   sale: {}, reservationState: 'held', reconciliationReason: null, canConfirmReceived: true, canCancel: true,
 };
 
-async function prepare(page: Page, overrides: Record<string, unknown> = {}, fail = false) {
+async function prepare(page: Page, overrides: Record<string, unknown> = {}, fail = false, openTransfer = true) {
   let confirmations = 0;
   await page.route('**/pos/**', async route => {
     const url = new URL(route.request().url());
     let body: unknown = { data: [] }, status = 200;
     if (url.pathname.endsWith('/devices/status')) body = { registered: true, passkey: false };
+    else if (url.pathname.endsWith('/catalog')) body = { data: [{ id: 'product-test', name: 'Rice SKU', sku: 'RICE', category: 'Grains', unit: 'Units', price: 10000, stock: 10, trackStock: true, isActive: true, batches: [{ batchNumber: 'old', quantityRemaining: 3, unitPrice: 1 }, { batchNumber: 'new', quantityRemaining: 7, unitPrice: 99999 }] }] };
+    else if (url.pathname.endsWith('/sales/quote')) body = { subtotal: 10000, total: 10000, discount: 0, tax: 0 };
     else if (url.pathname.endsWith('/payments/options')) body = { providers: [{ id: 'squad', name: 'Squad' }], manualConfirmationEnabled: true };
     else if (url.pathname.endsWith('/confirm-received')) {
       confirmations++;
@@ -37,8 +39,10 @@ async function prepare(page: Page, overrides: Record<string, unknown> = {}, fail
   });
   await page.reload();
   await page.waitForURL('**/sell');
-  await page.getByTitle('Bank transfers waiting for payment').click();
-  await page.getByRole('button', { name: /102.50/ }).click();
+  if (openTransfer) {
+    await page.getByTitle('Bank transfers waiting for payment').click();
+    await page.getByRole('button', { name: /102.50/ }).click();
+  }
   return () => confirmations;
 }
 
@@ -75,4 +79,11 @@ test('expired requests retain holds and hidden actions stay unavailable', async 
   await expect(page.getByText('Payment request expired — stock still held.', { exact: false })).toBeVisible();
   await expect(page.getByRole('button', { name: 'I have received payment' })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Cancel this transfer' })).toBeVisible();
+});
+test('adding a SKU uses its price directly without a batch picker', async ({ page }) => {
+  await prepare(page, {}, false, false);
+  await page.getByRole('button', { name: /Rice SKU/ }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.getByText('₦100.00 / Units', { exact: true })).toBeVisible();
+  await expect(page.getByText(/Choose the purchase batch/)).toHaveCount(0);
 });

@@ -6,13 +6,13 @@ export interface CartLine {
   product: PosProduct;
   qty: number;
   discount: number; // kobo, line-level
-  batchNumber: string;
+  batchNumber?: string; // legacy carts only; new sales are allocated server-side
   saleUnit: string;
-  unitPrice: number; // kobo for the chosen batch and sale unit
+  unitPrice: number; // kobo for the SKU and sale unit
 }
 
-export const lineKey = (l: Pick<CartLine, 'product' | 'batchNumber' | 'saleUnit'>) =>
-  `${l.product.id}:${l.batchNumber}:${l.saleUnit}`;
+export const lineKey = (l: Pick<CartLine, 'product' | 'saleUnit'>) =>
+  `${l.product.id}:${l.saleUnit}`;
 
 export const lineTotal = (l: CartLine) => Math.max(0, (l.unitPrice || l.product.price) * l.qty - l.discount);
 
@@ -99,7 +99,6 @@ export const toSaleLines = (lines: CartLine[]): PosSaleLine[] =>
     unitCost: l.product.cost,
     discount: l.discount,
     lineTotal: lineTotal(l),
-    batchNumber: l.batchNumber,
     saleUnit: l.saleUnit,
   }));
 

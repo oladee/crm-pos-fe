@@ -24,7 +24,7 @@ import { TransferPanel, TransferQueue, saleFromTransfer } from '@/components/tra
 import { DiscountModal } from '@/components/discount-modal';
 import { HeldModal } from '@/components/held-modal';
 import { CustomerModal } from '@/components/customer-modal';
-import { BatchPicker } from '@/components/batch-picker';
+import { UnitPicker } from '@/components/unit-picker';
 import { RequireShift } from '@/components/route-guards';
 import { SellSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
@@ -65,6 +65,21 @@ function SellScreen() {
   }, [refreshAvailability]);
 
   const [lines, setLines] = useState<CartLine[]>([]);
+  useEffect(() => {
+    setLines(current => {
+      let changed = false;
+      const next = current.map(line => {
+        const product = catalog.find(item => item.id === line.product.id);
+        if (!product) return line;
+        const price = line.saleUnit === 'Carton' ? product.cartonPrice || 0 : product.price;
+        if (price === line.unitPrice) return line;
+        changed = true;
+        return { ...line, product, unitPrice: price };
+      });
+      return changed ? next : current;
+    });
+  }, [catalog]);
+
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [customer, setCustomer] = useState<PosCustomer | null>(null);
@@ -123,7 +138,6 @@ function SellScreen() {
         orderDiscount,
         lines: lines.map((l) => ({
           productId: l.product.id,
-          batchNumber: l.batchNumber,
           saleUnit: l.saleUnit,
           qty: l.qty,
           discount: l.discount,
@@ -147,9 +161,9 @@ function SellScreen() {
   const myOpen = assists.filter((a) => a.cashierId === cashier?.id && (a.status === 'open' || a.status === 'in_progress')).length;
   const myResolved = assists.filter((a) => a.cashierId === cashier?.id && a.status === 'resolved').length;
 
-  const addBatchLine = (p: PosProduct, choice: { batchNumber: string; saleUnit: string; unitPrice: number }) => {
+  const addSkuLine = (p: PosProduct, choice: { saleUnit: string; unitPrice: number }) => {
     setLines((cur) => {
-      const key = lineKey({ product: p, batchNumber: choice.batchNumber, saleUnit: choice.saleUnit });
+      const key = lineKey({ product: p, saleUnit: choice.saleUnit });
       const i = cur.findIndex((l) => lineKey(l) === key);
       if (i >= 0) { const n = [...cur]; n[i] = { ...n[i], qty: n[i].qty + 1, unitPrice: choice.unitPrice }; return n; }
       return [...cur, { product: p, qty: 1, discount: 0, ...choice }];
@@ -262,7 +276,6 @@ function SellScreen() {
         orderDiscount,
         lines: sale.lines.map((line) => ({
           productId: line.productId,
-          batchNumber: line.batchNumber,
           saleUnit: line.saleUnit,
           qty: line.qty,
           discount: line.discount,
@@ -428,10 +441,10 @@ function SellScreen() {
     const restored: CartLine[] = h.lines
       .map((l) => {
         const p = catalog.find((x) => x.id === l.productId);
-        if (!p || !l.batchNumber || !l.saleUnit) return null;
-        const batch = p.batches?.find((b) => b.batchNumber === l.batchNumber);
-        const unitPrice = l.unitPrice || (l.saleUnit === 'Carton' ? batch?.cartonPrice : batch?.unitPrice) || p.price;
-        return { product: p, qty: l.qty, discount: l.discount, batchNumber: l.batchNumber, saleUnit: l.saleUnit, unitPrice };
+        if (!p) return null;
+        const saleUnit = l.saleUnit || p.unit;
+        const unitPrice = saleUnit === 'Carton' ? p.cartonPrice || 0 : p.price;
+        return { product: p, qty: l.qty, discount: l.discount, saleUnit, unitPrice };
       })
       .filter((x): x is CartLine => x !== null);
     setLines(restored);
@@ -540,14 +553,14 @@ function SellScreen() {
             <div className="product-grid grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-4">
               {visible.map((p) => {
                 const batches = (p.batches || []).filter((b) => b.quantityRemaining > 0);
-                const low = batches.length === 0;
+                const low = (p.stock || 0) <= 0;
                 return (
-                  <button key={p.id} onClick={() => batches.length ? setPicking(p) : toast.error('This product has no open batch')}
+                  <button key={p.id} onClick={() => low ? toast.error('No available stock') : p.unit.toLowerCase().startsWith('carton') ? setPicking(p) : addSkuLine(p, { saleUnit: p.unit, unitPrice: p.price })}
                     className="product-card tap relative p-3.5 text-left sm:p-4">
                     <span className="product-add absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-[10px]"><Plus size={16} /></span>
                     <p className="line-clamp-2 min-h-[2.6rem] pr-10 text-sm font-extrabold leading-[1.25] tracking-[-0.01em] sm:text-[15px]">{p.name}</p>
-                    <p className="mt-1.5 text-xs text-[var(--color-ink-dim)]">{batches.length ? `${batches.length} batch${batches.length === 1 ? '' : 'es'}` : 'No open batch'}</p>
-                    <p className={`mt-2 text-lg font-black tracking-[-0.02em] ${low ? 'text-[var(--color-danger)]' : 'text-[var(--color-brand)]'}`}>{batches.length ? `from ${fmt(p.price)}` : '—'}</p>
+                    <p className="mt-1.5 text-xs text-[var(--color-ink-dim)]">{low ? 'Out of stock' : `${p.stock} ${p.unit} available`}</p>
+                    <p className={`mt-2 text-lg font-black tracking-[-0.02em] ${low ? 'text-[var(--color-danger)]' : 'text-[var(--color-brand)]'}`}>{fmt(p.price)}</p>
                   </button>
                 );
               })}
@@ -583,7 +596,7 @@ function SellScreen() {
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <p className="text-sm font-extrabold leading-tight">{l.product.name}</p>
-                    <p className="mt-1 text-xs text-[var(--color-ink-dim)]">Batch {l.batchNumber} · {fmt(l.unitPrice)} / {l.saleUnit}</p>
+                    <p className="mt-1 text-xs text-[var(--color-ink-dim)]">{fmt(l.unitPrice)} / {l.saleUnit}</p>
                   </div>
                   <button onClick={() => removeLine(key)} aria-label={`Remove ${l.product.name}`} className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] text-[var(--color-ink-dim)] hover:bg-red-500/10 hover:text-[var(--color-danger)]"><Trash2 size={15} /></button>
                 </div>
@@ -709,7 +722,7 @@ function SellScreen() {
           onClose={() => setShowCustomers(false)}
         />
       )}
-      {picking && <BatchPicker product={picking} onClose={() => setPicking(null)} onAdd={(choice) => addBatchLine(picking, choice)} />}
+      {picking && <UnitPicker product={picking} onClose={() => setPicking(null)} onAdd={(choice) => addSkuLine(picking, choice)} />}
       {lastSale && <Receipt sale={lastSale} store={store} onClose={() => setLastSale(null)} />}
 
       {report && (

@@ -62,6 +62,8 @@ export interface PosProduct {
   price: number;      // kobo, lowest open batch price for the tile
   cost?: number;      // kobo
   unit: string;
+  cartonPrice?: number; // kobo, SKU-wide
+  cartonWeight?: number;
   stock?: number; // available stock
   onHandStock?: number;
   reservedStock?: number;

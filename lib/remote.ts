@@ -271,7 +271,7 @@ export async function quoteSale(input: {
   hubId: string;
   deviceId: string;
   orderDiscount?: number;
-  lines: Array<{ productId: string; batchNumber: string; saleUnit: string; qty: number; discount: number }>;
+  lines: Array<{ productId: string; batchNumber?: string; saleUnit: string; qty: number; discount: number }>;
 }) {
   return sendJson<{
     subtotal: number;
