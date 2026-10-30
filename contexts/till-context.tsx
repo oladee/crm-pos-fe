@@ -63,7 +63,7 @@ type TillContextValue = {
   manualSync: () => Promise<void>;
   copyPayloadForCrm: () => Promise<void>;
   deviceAccess: 'unknown' | 'enroll' | 'passkey' | 'legacy';
-  markEnrolled: (credentialId: string) => Promise<void>;
+  markEnrolled: (credentialId: string, label?: string) => Promise<void>;
 };
 
 const TillContext = createContext<TillContextValue | null>(null);
@@ -179,9 +179,9 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
     return { hasShift: false };
   }, []);
 
-  const markEnrolled = useCallback(async (credentialId: string) => {
+  const markEnrolled = useCallback(async (credentialId: string, label?: string) => {
     if (!store) return;
-    const next = { ...store, credentialId };
+    const next = { ...store, credentialId, deviceLabel: label || store.deviceLabel };
     await saveStore(next);
     setStore(next);
     setDeviceAccess('passkey');

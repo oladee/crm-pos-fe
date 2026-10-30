@@ -15,7 +15,7 @@ export function EnrollTill({
   onBindStore,
 }: {
   store: StoreProfile;
-  onEnrolled: (credentialId: string) => Promise<void> | void;
+  onEnrolled: (credentialId: string, label?: string) => Promise<void> | void;
   onBindStore?: (remote: RemoteStore) => Promise<void> | void;
 }) {
   const [code, setCode] = useState('');
@@ -34,7 +34,7 @@ export function EnrollTill({
         label: store.deviceLabel,
         response,
       });
-      await onEnrolled(enrolled.credentialId);
+      await onEnrolled(enrolled.credentialId, enrolled.label);
       const locations = await fetchStores(store.deviceId);
       if (locations[0]) await onBindStore?.(locations[0]);
       toast.success('This till is registered');

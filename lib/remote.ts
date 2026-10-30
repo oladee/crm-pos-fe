@@ -124,7 +124,7 @@ export async function enrollDevice(input: {
   label?: string;
   response: unknown;
 }) {
-  return sendJson<{ deviceId: string; hubId: string; credentialId: string }>(
+  return sendJson<{ deviceId: string; hubId: string; credentialId: string; label: string }>(
     '/pos/devices/enroll',
     'POST',
     input,
