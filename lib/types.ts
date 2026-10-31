@@ -108,6 +108,13 @@ export interface PosPayment {
 }
 
 export interface PosSale {
+  receiptPayment?: {
+    provider: 'bachs' | 'squad';
+    checkoutReference?: string;
+    feeKobo?: number;
+    paidKobo: number;
+    confirmedAt?: string;
+  };
   id: string;         // client-generated ??? idempotency key
   deviceId: string;
   storeId: string;

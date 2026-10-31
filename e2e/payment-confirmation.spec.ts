@@ -5,7 +5,12 @@ const payment = {
   clientSaleId: 'test-payment-reference', checkoutId: 'test-payment-reference', provider: 'squad',
   status: 'awaiting', bankName: 'GTBank', accountName: 'Lagos Store', accountNumber: '0123456789',
   payableKobo: 10250, cartTotalKobo: 10000, feeKobo: 250, currency: 'NGN', expiresAt: null,
-  sale: {}, reservationState: 'held', reconciliationReason: null, canConfirmReceived: true, canCancel: true,
+  sale: { posSale: {
+    id: 'test-payment-reference', deviceId: 'device-test', storeId: 'hub-test', cashierId: 'cashier-test', cashierName: 'Test Cashier',
+    lines: [{ productId: 'product-test', name: 'Rice SKU', sku: 'RICE', unit: 'kg', qty: 1, unitPrice: 10000, discount: 0, lineTotal: 10000 }],
+    subtotal: 10000, discount: 0, total: 10000, payments: [{ method: 'Transfer', amount: 10000 }], change: 0,
+    status: 'completed', createdAt: '2026-10-31T09:00:00.000Z', syncState: 'pending',
+  } }, reservationState: 'held', reconciliationReason: null, canConfirmReceived: true, canCancel: true,
 };
 
 async function prepare(page: Page, overrides: Record<string, unknown> = {}, fail = false, openTransfer = true) {
@@ -20,7 +25,9 @@ async function prepare(page: Page, overrides: Record<string, unknown> = {}, fail
     else if (url.pathname.endsWith('/confirm-received')) {
       confirmations++;
       status = fail ? 503 : 200;
-      body = fail ? { message: 'Please retry payment confirmation' } : { ...payment, status: 'paid', reservationState: 'consumed', canConfirmReceived: false };
+      body = fail ? { message: 'Please retry payment confirmation' } : { ...payment, ...overrides, status: 'paid', confirmedAt: '2026-10-31T09:05:00.000Z', reservationState: 'consumed', canConfirmReceived: false };
+    } else if (url.pathname.endsWith('/payments/transfers/test-payment-reference')) {
+      body = { ...payment, ...overrides, status: overrides.refreshStatus || 'awaiting', confirmedAt: '2026-10-31T09:05:00.000Z' };
     } else if (url.pathname.endsWith('/payments/transfers')) body = { data: [{ ...payment, ...overrides }] };
     else if (url.pathname.endsWith('/staff')) body = { data: [{ id: 'cashier-test', name: 'Test Cashier', email: 'cashier@example.com', role: 'cashier', isActive: true }] };
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
@@ -86,4 +93,87 @@ test('adding a SKU uses its price directly without a batch picker', async ({ pag
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(page.getByText('₦100.00 / Units', { exact: true })).toBeVisible();
   await expect(page.getByText(/Choose the purchase batch/)).toHaveCount(0);
+});
+
+test('confirmed payment receipt prints only 48 mm content and reopens from history', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await prepare(page);
+  await page.getByRole('button', { name: 'I have received payment' }).click();
+  await page.getByRole('button', { name: 'Confirm payment received', exact: true }).click();
+  await page.getByRole('button', { name: 'View receipt' }).click();
+  const receipt = page.getByRole('dialog', { name: 'Transaction receipt' });
+  await expect(receipt.getByText('Processor: Squad')).toBeVisible();
+  await expect(receipt.getByText(/Confirmed:/)).toContainText('10:05');
+  await expect(receipt.getByText(/Transaction:/)).toContainText('10:00');
+  await expect(receipt.getByText('Provider charges')).toBeVisible();
+  await expect(receipt.getByText('Total paid')).toBeVisible();
+  await page.evaluate(() => { window.print = () => { document.body.dataset.printCalls = String(Number(document.body.dataset.printCalls || 0) + 1); }; });
+  await receipt.getByRole('button', { name: 'Print receipt' }).click();
+  await receipt.getByRole('button', { name: 'Print receipt' }).click();
+  expect(await page.locator('body').getAttribute('data-print-calls')).toBe('2');
+  await page.emulateMedia({ media: 'print' });
+  await expect(receipt.getByRole('button', { name: 'Print receipt' })).not.toBeVisible();
+  await expect(page.getByTitle('Bank transfers waiting for payment')).not.toBeVisible();
+  const paper = page.locator('.receipt-paper');
+  const width = await paper.evaluate(node => node.getBoundingClientRect().width);
+  expect(width).toBeCloseTo(48 * 96 / 25.4, 0);
+  expect(await paper.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('thermal-receipt.png'), fullPage: true });
+  await page.emulateMedia({ media: 'screen' });
+  await receipt.getByRole('button', { name: 'Close receipt' }).click();
+  await page.goto('/history');
+  await page.getByRole('button').filter({ hasText: '#test-payment-reference' }).click();
+  await expect(page.getByRole('dialog', { name: 'Transaction receipt' }).getByText('Processor: Squad')).toBeVisible();
+  expect(await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('fudfarmer-pos', 4); r.onsuccess = () => resolve(r.result); });
+    const rows = await new Promise<unknown[]>(resolve => { const r = db.transaction('sales').objectStore('sales').getAll(); r.onsuccess = () => resolve(r.result); });
+    db.close(); return rows.length;
+  })).toBe(1);
+});
+
+test('webhook-confirmed status offers a receipt without opening a modal over the cart', async ({ page }) => {
+  await prepare(page, { refreshStatus: 'paid' });
+  await page.getByRole('button', { name: 'Check status' }).click();
+  await expect(page.getByRole('button', { name: 'View receipt' })).toBeVisible();
+  await expect(page.getByRole('dialog', { name: 'Transaction receipt' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'View receipt' }).click();
+  await expect(page.getByText('Processor: Squad')).toBeVisible();
+});
+
+test('long receipts and legacy sales fit without scroll clipping in print', async ({ page }, testInfo) => {
+  await prepare(page, {}, false, false);
+  await page.evaluate(async () => {
+    const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('fudfarmer-pos', 4); r.onsuccess = () => resolve(r.result); });
+    const t = db.transaction('sales', 'readwrite');
+    t.objectStore('sales').put({
+      id: 'legacy-long-receipt', deviceId: 'device-test', storeId: 'hub-test', cashierName: 'Test Cashier',
+      createdAt: '2026-10-31T09:00:00Z', status: 'completed', syncState: 'synced', subtotal: 123456789, discount: 1234,
+      tax: 100, taxRatePct: 7.5, total: 123455655, payments: [{ method: 'Cash', amount: 123455655 }], change: 0,
+      lines: Array.from({ length: 40 }, (_, i) => ({
+        productId: String(i), name: 'VeryLongUnbrokenProductNameThatMustWrapWithoutClipping' + i, sku: String(i),
+        unit: 'kg', qty: 1.25, unitPrice: 1234567, lineTotal: 1543209, discount: 50,
+      })),
+    });
+    await new Promise<void>(resolve => { t.oncomplete = () => resolve(); }); db.close();
+  });
+  await page.goto('/history');
+  await page.getByRole('button').filter({ hasText: '#legacy-long-receipt' }).click();
+  await expect(page.getByText('Processor: Squad')).toHaveCount(0);
+  await page.emulateMedia({ media: 'print' });
+  const paper = page.locator('.receipt-paper');
+  expect(await paper.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  expect(await page.locator('.receipt-preview').evaluate(node => node.scrollHeight <= node.clientHeight + 1)).toBe(true);
+  await expect(page.getByText('VeryLongUnbrokenProductNameThatMustWrapWithoutClipping39')).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath('long-thermal-receipt.png'), fullPage: true });
+});
+
+test('paid receipt recovery is idempotent across reloads', async ({ page }) => {
+  await prepare(page, { status: 'paid', confirmedAt: '2026-10-31T09:05:00Z' }, false, false);
+  await expect(page.getByRole('button', { name: 'View receipt' })).toBeVisible();
+  await page.reload();
+  await expect(page.getByTitle('Bank transfers waiting for payment')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'View receipt' })).toHaveCount(0);
+  await page.goto('/history');
+  await page.getByRole('button').filter({ hasText: '#test-payment-reference' }).click();
+  await expect(page.getByText('Processor: Squad')).toBeVisible();
 });

@@ -226,6 +226,7 @@ export type PosTransfer = {
   canConfirmReceived: boolean;
   canCancel: boolean;
   confirmationSource: string | null;
+  confirmedAt?: string | null;
   bankName: string;
   accountName: string;
   accountNumber: string;
@@ -253,7 +254,7 @@ export async function startPosTransfer(body: Record<string, unknown>) {
 
 export async function listPosTransfers(deviceId: string) {
   const res = await getJson<{ data: PosTransfer[] }>(
-    `/pos/payments/transfers?deviceId=${encodeURIComponent(deviceId)}`,
+    `/pos/payments/transfers?deviceId=${encodeURIComponent(deviceId)}&includePaid=true`,
     true,
   );
   return res.data ?? [];

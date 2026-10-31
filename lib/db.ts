@@ -199,28 +199,36 @@ export async function recordSale(sale: PosSale): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const t = db.transaction([STORES.sales, STORES.outbox, STORES.catalog], 'readwrite');
-    t.objectStore(STORES.sales).put(sale);
-    if (sale.syncState !== 'synced') t.objectStore(STORES.outbox).put({
-      id: `ob-${sale.id}`,
-      type: 'sale',
-      refId: sale.id,
-      payload: sale,
-      attempts: 0,
-      createdAt: sale.createdAt,
-      state: 'pending' as SyncState,
-    } satisfies OutboxItem);
+    const existing = t.objectStore(STORES.sales).get(sale.id);
+    existing.onsuccess = () => {
+      if (existing.result) {
+        // Enrich a receipt without consuming stock twice or undoing a refund.
+        if (sale.receiptPayment) t.objectStore(STORES.sales).put({ ...existing.result, receiptPayment: sale.receiptPayment });
+        return;
+      }
+      t.objectStore(STORES.sales).put(sale);
+      if (sale.syncState !== 'synced') t.objectStore(STORES.outbox).put({
+        id: `ob-${sale.id}`,
+        type: 'sale',
+        refId: sale.id,
+        payload: sale,
+        attempts: 0,
+        createdAt: sale.createdAt,
+        state: 'pending' as SyncState,
+      } satisfies OutboxItem);
 
-    // decrement local stock estimate (server remains the truth)
-    const cat = t.objectStore(STORES.catalog);
-    sale.lines.forEach((l) => {
-      const req = cat.get(l.productId);
-      req.onsuccess = () => {
-        const p = req.result as PosProduct | undefined;
-        if (p && p.trackStock && typeof p.stock === 'number') {
-          cat.put({ ...p, stock: p.stock - l.qty });
-        }
-      };
-    });
+      // decrement local stock estimate (server remains the truth)
+      const cat = t.objectStore(STORES.catalog);
+      sale.lines.forEach((l) => {
+        const req = cat.get(l.productId);
+        req.onsuccess = () => {
+          const p = req.result as PosProduct | undefined;
+          if (p && p.trackStock && typeof p.stock === 'number') {
+            cat.put({ ...p, stock: p.stock - l.qty });
+          }
+        };
+      });
+    };
 
     t.oncomplete = () => resolve();
     t.onerror = () => reject(t.error);

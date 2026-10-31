@@ -1,73 +1,90 @@
 'use client';
 
-import { X, Printer, CloudOff, Cloud, Check } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { X, Printer } from 'lucide-react';
 import { PosSale, StoreProfile } from '@/lib/types';
 import { fmt } from '@/lib/money';
+import { receiptDate } from '@/lib/receipt';
 
-/** Post-sale receipt. Renders from the locally-stored sale ??? works fully offline. */
 export function Receipt({ sale, store, onClose }: { sale: PosSale; store: StoreProfile; onClose: () => void }) {
-  const when = new Date(sale.createdAt);
-  return (
-    <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
-      <div className="w-full max-w-xs rounded-2xl bg-white text-black overflow-hidden">
-        <div className="p-3 border-b border-black/10 flex items-center justify-between">
-          <span className="inline-flex items-center gap-1.5 text-xs font-black text-emerald-700"><Check size={14} /> Sale complete</span>
-          <button onClick={onClose} className="text-black/40 hover:text-black"><X size={18} /></button>
+  const payment = sale.receiptPayment;
+  return createPortal(
+    <div className="receipt-overlay modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
+      <style>{thermalStyles}</style>
+      <section role="dialog" aria-modal="true" aria-label="Transaction receipt" className="receipt-shell w-full max-w-xs overflow-hidden rounded-2xl bg-white text-black">
+        <header className="receipt-controls flex items-center justify-between border-b border-black/15 p-3">
+          <h1 className="text-sm font-bold">Transaction receipt</h1>
+          <button aria-label="Close receipt" onClick={onClose} className="grid h-11 w-11 place-items-center"><X size={18} /></button>
+        </header>
+        <div className="receipt-preview max-h-[60dvh] overflow-y-auto py-4">
+          <article className="receipt-paper" aria-label="Receipt details">
+            <header className="text-center">
+              <h2>{store.storeName}</h2>
+              <p>{sale.status === 'completed' ? 'SALE RECEIPT' : sale.status.toUpperCase()}</p>
+              <p>Receipt: {sale.id}</p>
+              <p>Transaction: {receiptDate(sale.createdAt)} WAT</p>
+              <p>Till: {store.deviceLabel}</p>
+              <p>Cashier: {sale.cashierName}</p>
+              {sale.customerName && <p>Customer: {sale.customerName}</p>}
+            </header>
+            <section className="receipt-section" aria-label="Purchased items">
+              {sale.lines.map((line, index) => <div className="receipt-item" key={`${line.productId}-${index}`}>
+                <p className="font-bold">{line.name}</p>
+                <Row label={`${line.qty} ${line.saleUnit || line.unit} × ${fmt(line.unitPrice)}`} value={fmt(line.lineTotal)} />
+                {line.discount > 0 && <p>Item discount (included): {fmt(line.discount)}</p>}
+              </div>)}
+            </section>
+            <section className="receipt-section" aria-label="Receipt totals">
+              <Row label="Subtotal" value={fmt(sale.subtotal)} />
+              {sale.discount > 0 && <Row label="Discount" value={`-${fmt(sale.discount)}`} />}
+              {!!sale.tax && <Row label={`${store.taxLabel || 'Tax'}${sale.taxRatePct ? ` ${sale.taxRatePct}%` : ''}`} value={fmt(sale.tax)} />}
+              <Row label="Sale total" value={fmt(sale.total)} strong />
+              {payment?.feeKobo != null && <Row label="Provider charges" value={fmt(payment.feeKobo)} />}
+              {payment && <Row label="Total paid" value={fmt(payment.paidKobo)} strong />}
+            </section>
+            <section className="receipt-section" aria-label="Payment details">
+              {sale.payments.map((entry, i) => <Row key={i} label={entry.method} value={fmt(entry.amount)} />)}
+              {payment && <p>Processor: {payment.provider === 'squad' ? 'Squad' : 'Bachs'}</p>}
+              {payment?.checkoutReference && <p>Payment ref: {payment.checkoutReference}</p>}
+              {payment?.confirmedAt && <p>Confirmed: {receiptDate(payment.confirmedAt)} WAT</p>}
+              {sale.change > 0 && <Row label="Change" value={fmt(sale.change)} />}
+            </section>
+            {store.receiptFooter && <p className="receipt-section text-center">{store.receiptFooter}</p>}
+          </article>
         </div>
-
-        <div className="p-4 font-mono text-[11px] leading-relaxed max-h-[60vh] overflow-y-auto">
-          <div className="text-center">
-            <p className="font-black text-sm">{store.storeName}</p>
-            <p>{store.deviceLabel} ?? {sale.cashierName}</p>
-            <p>{when.toLocaleString('en-NG')}</p>
-            <p className="mt-1 break-all text-[9px] text-black/50">#{sale.id}</p>
+        <footer className="receipt-controls border-t border-black/15 p-3">
+          <p className="mb-3 text-xs leading-5">Select the terminal printer and 58 mm paper in the print dialog. You can retry printing from sales history.</p>
+          <div className="flex gap-2">
+            <button onClick={() => window.print()} className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-black/30 text-sm font-bold"><Printer size={16} />Print receipt</button>
+            <button onClick={onClose} className="min-h-11 flex-1 rounded-xl bg-emerald-700 text-sm font-bold text-white">Close</button>
           </div>
-
-          <div className="my-2 border-t border-dashed border-black/30" />
-
-          {sale.lines.map((l) => (
-            <div key={l.productId} className="flex justify-between gap-2">
-              <span className="flex-1">{l.qty} x {l.name}</span>
-              <span>{fmt(l.lineTotal)}</span>
-            </div>
-          ))}
-
-          <div className="my-2 border-t border-dashed border-black/30" />
-
-          <div className="flex justify-between"><span>Subtotal</span><span>{fmt(sale.subtotal)}</span></div>
-          {sale.discount > 0 && <div className="flex justify-between"><span>Discount</span><span>-{fmt(sale.discount)}</span></div>}
-          {sale.tax ? (
-            <div className="flex justify-between">
-              <span>{store.taxLabel || 'Tax'} {sale.taxRatePct ? `${sale.taxRatePct}%` : ''}{store.taxInclusive ? ' (incl.)' : ''}</span>
-              <span>{fmt(sale.tax)}</span>
-            </div>
-          ) : null}
-          <div className="flex justify-between font-black text-sm"><span>TOTAL</span><span>{fmt(sale.total)}</span></div>
-
-          <div className="my-2 border-t border-dashed border-black/30" />
-
-          {sale.payments.map((p, i) => (
-            <div key={i} className="flex justify-between"><span>{p.method}</span><span>{fmt(p.amount)}</span></div>
-          ))}
-          {sale.change > 0 && <div className="flex justify-between font-bold"><span>Change</span><span>{fmt(sale.change)}</span></div>}
-          {sale.customerName && <p className="mt-1">Customer: {sale.customerName}</p>}
-
-          <p className="text-center mt-3">{store.receiptFooter}</p>
-
-          <div className={`mt-3 text-center text-[10px] font-bold ${sale.syncState === 'synced' ? 'text-emerald-700' : 'text-amber-700'}`}>
-            {sale.syncState === 'synced'
-              ? <span className="inline-flex items-center gap-1"><Cloud size={11} /> Synced to head office</span>
-              : <span className="inline-flex items-center gap-1"><CloudOff size={11} /> Saved on this device - syncs when online</span>}
-          </div>
-        </div>
-
-        <div className="p-3 border-t border-black/10 flex gap-2">
-          <button onClick={() => window.print()} className="flex-1 h-11 rounded-xl border border-black/15 font-bold text-xs inline-flex items-center justify-center gap-1.5">
-            <Printer size={14} /> Print
-          </button>
-          <button onClick={onClose} className="flex-1 h-11 rounded-xl bg-emerald-600 text-white font-bold text-xs">New sale</button>
-        </div>
-      </div>
-    </div>
+        </footer>
+      </section>
+    </div>, document.body,
   );
 }
+
+function Row({ label, value, strong = false }: { label: string; value: string; strong?: boolean }) {
+  return <div className={`receipt-row${strong ? ' receipt-total' : ''}`}><span>{label}</span><span>{value}</span></div>;
+}
+
+// The initial 48 mm printable width must be calibrated on the physical Z92.
+const thermalStyles = `
+.receipt-paper { width: 48mm; margin: 0 auto; color: #000; background: #fff; font: 11px/1.45 Arial, sans-serif; overflow-wrap: anywhere; }
+.receipt-paper p { margin: 0 0 3px; }
+.receipt-paper h2 { font-size: 15px; font-weight: 800; margin: 0 0 5px; }
+.receipt-row { display: grid; grid-template-columns: minmax(0,1fr) max-content; gap: 6px; margin: 3px 0; }
+.receipt-row > :last-child { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.receipt-section { border-top: 1px dashed #000; margin-top: 8px; padding-top: 8px; }
+.receipt-item { margin-bottom: 8px; break-inside: avoid; }
+.receipt-total { font-weight: 800; font-size: 13px; }
+@media print {
+  @page { size: auto; margin: 0; }
+  html, body { width: 58mm !important; min-width: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; }
+  body > :not(.receipt-overlay) { display: none !important; }
+  .receipt-overlay, .receipt-shell, .receipt-preview { display: block !important; position: static !important; width: 58mm !important; max-width: none !important; height: auto !important; max-height: none !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: #fff !important; }
+  .receipt-controls { display: none !important; }
+  .receipt-paper { padding: 3mm 0 8mm; }
+  .receipt-paper * { color: #000 !important; border-color: #000 !important; }
+}
+`;

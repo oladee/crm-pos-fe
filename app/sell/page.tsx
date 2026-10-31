@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import {
@@ -17,10 +17,11 @@ import { fetchCatalog, quoteSale, startPosTransfer, listPosTransfers, refreshPos
 import { buildReport, ShiftReport } from '@/lib/shift';
 import { fmt } from '@/lib/money';
 import { Receipt } from '@/components/receipt';
+import { confirmedTransferSale } from '@/lib/receipt';
 import { ReportModal, PinGate } from '@/components/shift-panels';
 import { RequestHelpModal, MyRequests } from '@/components/assist-panels';
 import { PaymentModal } from '@/components/payment-modal';
-import { TransferPanel, TransferQueue, saleFromTransfer } from '@/components/transfer-panel';
+import { TransferPanel, TransferQueue } from '@/components/transfer-panel';
 import { DiscountModal } from '@/components/discount-modal';
 import { HeldModal } from '@/components/held-modal';
 import { CustomerModal } from '@/components/customer-modal';
@@ -103,6 +104,8 @@ function SellScreen() {
   const [activeTransfer, setActiveTransfer] = useState<PosTransfer | null>(null);
   const [showTransfers, setShowTransfers] = useState(false);
   const [checkingTransfer, setCheckingTransfer] = useState(false);
+  const settlingTransfers = useRef(new Set<string>());
+  const notifiedTransfers = useRef(new Set<string>());
 
   const categories = useMemo(() => ['All', ...Array.from(new Set(catalog.map((p) => p.category)))], [catalog]);
   const visible = useMemo(() => catalog.filter((p) =>
@@ -218,17 +221,26 @@ function SellScreen() {
       setActiveTransfer((current) => current?.clientSaleId === transfer.clientSaleId ? transfer : current);
       return;
     }
-    const sale = saleFromTransfer(transfer);
-    if (sale && !sales.some((row) => row.id === sale.id)) {
-      const recorded = { ...sale, payments: [{ method: 'Transfer' as const, amount: transfer.cartTotalKobo, reference: transfer.checkoutId }], syncState: 'synced' as const };
-      await recordSale(recorded);
-      await refreshSyncState();
-      void flushOutbox().then(refreshSyncState);
-    }
-    setTransfers((current) => current.filter((row) => row.clientSaleId !== transfer.clientSaleId));
-    setActiveTransfer(null);
-    await refreshAvailability();
-    toast.success('Transfer received');
+    if (settlingTransfers.current.has(transfer.clientSaleId)) return;
+    settlingTransfers.current.add(transfer.clientSaleId);
+    try {
+      const recorded = confirmedTransferSale(transfer);
+      if (recorded) {
+        await recordSale(recorded);
+        await refreshSyncState();
+        void flushOutbox().then(refreshSyncState);
+      }
+      setTransfers((current) => current.filter((row) => row.clientSaleId !== transfer.clientSaleId));
+      setActiveTransfer(current => current?.clientSaleId === transfer.clientSaleId ? null : current);
+      await refreshAvailability();
+      if (!sales.some(row => row.id === transfer.clientSaleId) && !notifiedTransfers.current.has(transfer.clientSaleId)) {
+        notifiedTransfers.current.add(transfer.clientSaleId);
+        toast.success('Transfer received', recorded ? {
+          duration: 10000,
+          action: { label: 'View receipt', onClick: () => setLastSale(recorded) },
+        } : { description: 'Receipt details are unavailable. Contact your manager.' });
+      }
+    } finally { settlingTransfers.current.delete(transfer.clientSaleId); }
   };
 
   const startTransfer = async (provider: 'bachs' | 'squad') => {
@@ -337,7 +349,14 @@ function SellScreen() {
     let cancelled = false;
     void listPosTransfers(store.deviceId).then((rows) => {
       if (!cancelled) {
-        setTransfers(rows);
+        setTransfers(rows.filter(row => row.status !== 'paid'));
+        // Recover confirmations received while the PWA was closed.
+        void (async () => {
+          for (const row of rows.filter(row => row.status === 'paid')) {
+            if (cancelled) break;
+            await settleTransfer(row);
+          }
+        })().catch(() => toast.error('Could not restore payment receipts. Reconnect to retry.'));
         const attemptKey = 'pos.transferAttempt.' + store.deviceId;
         try {
           const attempt = JSON.parse(sessionStorage.getItem(attemptKey) || 'null');
