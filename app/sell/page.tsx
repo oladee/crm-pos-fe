@@ -17,6 +17,10 @@ import { fetchCatalog, quoteSale, startPosTransfer, listPosTransfers, refreshPos
 import { buildReport, ShiftReport } from '@/lib/shift';
 import { fmt } from '@/lib/money';
 import { Receipt } from '@/components/receipt';
+import { CheckoutModal } from '@/components/checkout-modal';
+import { CheckoutActivity, RepayCreditModal } from '@/components/checkout-activity';
+import { checkoutOptions, type Checkout, type CheckoutOptions } from '@/lib/checkouts';
+import { recoverCheckoutReceipts } from '@/lib/checkout-history';
 import { confirmedTransferSale } from '@/lib/receipt';
 import { ReportModal, PinGate } from '@/components/shift-panels';
 import { RequestHelpModal, MyRequests } from '@/components/assist-panels';
@@ -104,6 +108,30 @@ function SellScreen() {
   const [activeTransfer, setActiveTransfer] = useState<PosTransfer | null>(null);
   const [showTransfers, setShowTransfers] = useState(false);
   const [checkingTransfer, setCheckingTransfer] = useState(false);
+  const [v2Options, setV2Options] = useState<CheckoutOptions | null>(null);
+  const [showCheckout, setShowCheckout] = useState(false);
+  const [activeCheckout, setActiveCheckout] = useState<Checkout | null>(null);
+  const [checkoutCart, setCheckoutCart] = useState<Record<string, unknown> | undefined>();
+  const [checkoutActivity, setCheckoutActivity] = useState(false);
+  const [repayingCredit, setRepayingCredit] = useState(false);
+  const [customerIntent, setCustomerIntent] = useState<'checkout' | 'repay' | null>(null);
+  const completedCheckouts = useRef(new Set<string>());
+  useEffect(() => { if (online && cashier) void checkoutOptions().then(setV2Options).catch(() => setV2Options(null)); }, [online, cashier?.id]);
+  useEffect(() => {
+    if (!online || !v2Options?.enabled) return;
+    let active = true, running = false;
+    const recover = async () => { if (running) return; running = true;
+      try { const receipts = await recoverCheckoutReceipts(); if (!active) return;
+        for (const receipt of receipts) if (!sales.some(sale => sale.id === receipt.id) && !completedCheckouts.current.has(receipt.id)) {
+          completedCheckouts.current.add(receipt.id);
+          toast.success(receipt.kind === 'repayment' ? 'Credit repayment received' : 'Checkout recorded', { action: { label: 'View receipt', onClick: () => { setShowCheckout(false); setLastSale(receipt); } } });
+        }
+        await refreshSyncState();
+      } catch { /* Existing receipts remain available offline. */ } finally { running = false; }
+    };
+    void recover(); const timer = setInterval(() => void recover(), 15000);
+    return () => { active = false; clearInterval(timer); };
+  }, [online, v2Options?.enabled, store?.deviceId]);
   const settlingTransfers = useRef(new Set<string>());
   const notifiedTransfers = useRef(new Set<string>());
 
@@ -195,16 +223,30 @@ function SellScreen() {
     setDiscountFor(null);
   };
 
-  const startCheckout = () => {
+  const beginPayment = (selectedCustomer = customer) => {
     if (needsDiscountApproval && !discountApproved) { setDiscountGate(true); return; }
-    setShowPay(true);
+    if (v2Options?.enabled) {
+      setCheckoutCart({ clientSaleId: newSaleId(store!.deviceId), customerId: selectedCustomer!.id, customerName: selectedCustomer!.name,
+        hubId: store!.hubId || store!.storeId, deviceId: store!.deviceId, shiftId: shift?.id, total,
+        orderDiscount, lines: toSaleLines(lines).map(line => ({ productId: line.productId, qty: line.qty, saleUnit: line.saleUnit, discount: line.discount })) });
+      setActiveCheckout(null); setShowCheckout(true);
+    } else setShowPay(true);
+  };
+  const startCheckout = () => {
+    if (!customer) { setCustomerIntent('checkout'); setShowCustomers(true); return; }
+    beginPayment();
   };
   const authoriseDiscount = (pin: string) => {
     const sup = cashiers.find((c) => c.pin === pin && c.isActive && canFully(c.role, 'discount.approve'));
     if (!sup) { toast.error('That PIN cannot approve discounts'); return; }
     setDiscountApproved(true);
     setDiscountGate(false);
-    setShowPay(true);
+    if (v2Options?.enabled) {
+      setCheckoutCart({ clientSaleId: newSaleId(store!.deviceId), customerId: customer!.id, customerName: customer!.name,
+        hubId: store!.hubId || store!.storeId, deviceId: store!.deviceId, shiftId: shift?.id, total, orderDiscount,
+        lines: toSaleLines(lines).map(line => ({ productId: line.productId, qty: line.qty, saleUnit: line.saleUnit, discount: line.discount })) });
+      setActiveCheckout(null); setShowCheckout(true);
+    } else setShowPay(true);
     toast.success(`Discount authorised by ${sup.name.split(' (')[0]}`);
   };
 
@@ -412,6 +454,17 @@ function SellScreen() {
     void flushOutbox().then(refreshSyncState);
   };
 
+  const checkoutUpdated = async (row: Checkout) => {
+    if (row.status !== 'completed' || !row.receipt) return;
+    await recordSale(row.receipt); await refreshSyncState(); await refreshAvailability();
+    if (!completedCheckouts.current.has(row.clientSaleId)) {
+      completedCheckouts.current.add(row.clientSaleId);
+      const receipt = row.receipt;
+      toast.success(row.kind === 'repayment' ? 'Credit repayment recorded' : 'Checkout recorded', { duration: 10000,
+        action: { label: 'View receipt', onClick: () => { setShowCheckout(false); setLastSale(receipt); } } });
+    }
+  };
+
   const showReport = (kind: 'X' | 'Z') => {
     if (!shift) return;
     setReport({ data: buildReport(shift, sales), kind });
@@ -599,6 +652,10 @@ function SellScreen() {
             {customer ? <><span className="inline-flex min-w-0 items-center gap-2"><User size={16} className="shrink-0 text-[var(--color-brand)]" /><span className="truncate">{customer.name}</span></span><span className="text-[var(--color-brand)]">Change</span></> : <><span className="inline-flex items-center gap-2"><UserPlus size={16} className="text-[var(--color-brand)]" /> Add customer details</span><ChevronRight size={16} className="text-[var(--color-brand)]" /></>}
           </button>
 
+          {v2Options?.enabled && <div className="mx-4 mt-2 grid grid-cols-2 gap-2 text-xs font-bold">
+            <button className="min-h-11 rounded-lg border border-[var(--color-line)]" onClick={() => setCheckoutActivity(true)}>Checkouts</button>
+            <button className="min-h-11 rounded-lg border border-[var(--color-line)]" onClick={() => { if (customer) setRepayingCredit(true); else { setCustomerIntent('repay'); setShowCustomers(true); } }}>Repay credit</button>
+          </div>}
           <div className="flex-1 space-y-2.5 overflow-y-auto p-4">
             {lines.length === 0 && (
               <div className="px-6 py-16 text-center">
@@ -673,7 +730,7 @@ function SellScreen() {
             </div>
             <button disabled={lines.length === 0 || (online && (quoting || !quote))} onClick={startCheckout}
               className="primary-action h-14 w-full rounded-[11px] text-base font-black disabled:opacity-40">
-              {online && quoting ? 'Checking price…' : online && lines.length > 0 && !quote ? 'Price check failed' : `Charge ${total > 0 ? fmt(total) : ''}`}
+              {online && quoting ? 'Checking price…' : online && lines.length > 0 && !quote ? 'Price check failed' : `Continue ${total > 0 ? fmt(total) : ''}`}
             </button>
           </div>
         </aside>
@@ -736,11 +793,20 @@ function SellScreen() {
         <CustomerModal
           hubId={store.hubId || store.storeId}
           customers={customers}
-          onPick={(c) => { setCustomer(c); setShowCustomers(false); }}
+          onPick={(c) => { setCustomer(c); setShowCustomers(false); const intent = customerIntent; setCustomerIntent(null); if (intent === 'checkout') beginPayment(c); if (intent === 'repay') setRepayingCredit(true); }}
           onClear={() => { setCustomer(null); setShowCustomers(false); }}
-          onClose={() => setShowCustomers(false)}
+          onClose={() => { setShowCustomers(false); setCustomerIntent(null); }}
         />
       )}
+      {showCheckout && v2Options && <CheckoutModal key={activeCheckout?.id || String(checkoutCart?.clientSaleId)} cart={checkoutCart} checkout={activeCheckout} options={v2Options}
+        onCreated={(row) => { if (row.kind === 'sale') clearCart(); }} onUpdate={checkoutUpdated}
+        onClose={() => { setShowCheckout(false); setActiveCheckout(null); }} />}
+      {checkoutActivity && <CheckoutActivity manager={cashier.role === 'manager'} onClose={() => setCheckoutActivity(false)} onOpen={(row) => {
+        setCheckoutActivity(false); if (row.status === 'completed' && row.receipt) setLastSale(row.receipt);
+        else { setActiveCheckout(row); setCheckoutCart(undefined); setShowCheckout(true); }
+      }} />}
+      {repayingCredit && customer && <RepayCreditModal customerId={customer.id} customerName={customer.name} deviceId={store.deviceId} shiftId={shift?.id}
+        onClose={() => setRepayingCredit(false)} onCreated={(row) => { setRepayingCredit(false); setActiveCheckout(row); setCheckoutCart(undefined); setShowCheckout(true); }} />}
       {picking && <UnitPicker product={picking} onClose={() => setPicking(null)} onAdd={(choice) => addSkuLine(picking, choice)} />}
       {lastSale && <Receipt sale={lastSale} store={store} onClose={() => setLastSale(null)} />}
 

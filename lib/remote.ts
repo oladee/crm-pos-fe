@@ -46,12 +46,12 @@ async function readJson<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
     const message = (body as { message?: string }).message || `POS API ${res.status}`;
-    throw new Error(message);
+    throw Object.assign(new Error(message), { status: res.status });
   }
   return body as T;
 }
 
-async function getJson<T>(path: string, auth = false): Promise<T> {
+export async function getJson<T>(path: string, auth = false): Promise<T> {
   const headers: Record<string, string> = {};
   const token = getPinToken();
   if (auth && token) headers.Authorization = `Bearer ${token}`;
@@ -59,7 +59,7 @@ async function getJson<T>(path: string, auth = false): Promise<T> {
   return readJson<T>(res);
 }
 
-async function sendJson<T>(path: string, method: string, body: unknown, auth = true): Promise<T> {
+export async function sendJson<T>(path: string, method: string, body: unknown, auth = true): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   const token = getPinToken();
   if (auth && token) headers.Authorization = `Bearer ${token}`;
@@ -292,7 +292,7 @@ export async function searchPosCustomers(q: string) {
   return (res.data ?? []).map((row) => ({ id: row.id, name: row.name, phone: row.phone }));
 }
 
-export async function createPosCustomer(input: { name: string; phone: string }) {
+export async function createPosCustomer(input: { name: string; phone?: string }) {
   const res = await sendJson<{ data: { id: string; name: string; phone?: string } }>('/pos/customers', 'POST', input);
   return { id: res.data.id, name: res.data.name, phone: res.data.phone };
 }

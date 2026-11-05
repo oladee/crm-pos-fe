@@ -7,6 +7,7 @@
  */
 
 import { PosProduct, PosCustomer, PosSale, OutboxItem, StoreProfile, Cashier, Shift, SyncState, HeldSale, StockCount, AssistRequest } from './types';
+import { sendJson } from './remote';
 
 const DB_NAME = 'fudfarmer-pos';
 const DB_VERSION = 4;
@@ -219,7 +220,7 @@ export async function recordSale(sale: PosSale): Promise<void> {
 
       // decrement local stock estimate (server remains the truth)
       const cat = t.objectStore(STORES.catalog);
-      sale.lines.forEach((l) => {
+      (sale.kind === 'repayment' ? [] : sale.lines).forEach((l) => {
         const req = cat.get(l.productId);
         req.onsuccess = () => {
           const p = req.result as PosProduct | undefined;
@@ -308,18 +309,32 @@ export async function reverseSale(
     refundedAt: at, refundedBy: opts.by, refundReason: opts.reason,
   };
 
+  // Credit reversals must reconcile the authoritative ledger before local stock changes.
+  if (original.creditId) {
+    const result = await sendJson<{ creditBalanceKobo: number; refundPaidKobo: number }>(`/pos/sales/${encodeURIComponent(original.id)}/${opts.mode === 'voided' ? 'void' : 'refund'}`, 'POST', {
+      ...reversal, reversalId: reversal.id, hubId: original.hubId || original.storeId,
+    });
+    const debtReduction = refundTotal - result.refundPaidKobo;
+    reversal.payments = [];
+    if (result.refundPaidKobo > 0) reversal.payments.push({ method: original.payments.find(p => p.method !== 'Credit')?.method || 'Transfer', amount: -result.refundPaidKobo });
+    if (debtReduction > 0) reversal.payments.push({ method: 'Credit', amount: -debtReduction });
+    reversal.creditBalanceKobo = result.creditBalanceKobo;
+    reversal.syncState = 'synced';
+  }
+
   return new Promise((resolve, reject) => {
     const t = db.transaction([STORES.sales, STORES.outbox, STORES.catalog], 'readwrite');
     const salesStore = t.objectStore(STORES.sales);
     // Stamp the original: only flip its status once everything has been returned.
     salesStore.put({
       ...original,
+        ...(original.creditId ? { creditBalanceKobo: reversal.creditBalanceKobo } : {}),
       status: fullyReturned ? opts.mode : original.status,
       returnedQty: nextReturned,
       refundedAt: at, refundedBy: opts.by, refundReason: opts.reason,
     });
     salesStore.put(reversal);
-    t.objectStore(STORES.outbox).put({
+    if (reversal.syncState !== 'synced') t.objectStore(STORES.outbox).put({
       id: `ob-${reversal.id}`,
       type: opts.mode === 'voided' ? 'void' : 'refund',
       refId: reversal.id,

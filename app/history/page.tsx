@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { SalesHistory, ReturnModal } from '@/components/sales-history';
@@ -14,6 +14,8 @@ import { reverseSale } from '@/lib/db';
 import { flushOutbox } from '@/lib/sync';
 import { fmt } from '@/lib/money';
 import { PosSale } from '@/lib/types';
+import { checkoutOptions } from '@/lib/checkouts';
+import { recoverCheckoutReceipts } from '@/lib/checkout-history';
 
 export default function HistoryPage() {
   return (
@@ -30,6 +32,9 @@ function HistoryScreen() {
   const [returnFor, setReturnFor] = useState<{ sale: PosSale; mode: 'refunded' | 'voided' } | null>(null);
   const [returnAuth, setReturnAuth] = useState<string | null>(null);
   const [viewSale, setViewSale] = useState<PosSale | null>(null);
+  useEffect(() => { let active = true; void checkoutOptions().then(async options => {
+    if (options.enabled) { await recoverCheckoutReceipts(); if (active) await refreshSyncState(); }
+  }).catch(() => undefined); return () => { active = false; }; }, [refreshSyncState]);
 
   const authoriseReversal = (pin: string) => {
     if (!pendingReversal) return;

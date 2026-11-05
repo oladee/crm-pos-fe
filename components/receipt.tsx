@@ -20,7 +20,7 @@ export function Receipt({ sale, store, onClose }: { sale: PosSale; store: StoreP
           <article className="receipt-paper" aria-label="Receipt details">
             <header className="text-center">
               <h2>{store.storeName}</h2>
-              <p>{sale.status === 'completed' ? 'SALE RECEIPT' : sale.status.toUpperCase()}</p>
+              <p>{sale.kind === 'repayment' ? 'CREDIT REPAYMENT' : sale.status === 'completed' ? 'SALE RECEIPT' : sale.status.toUpperCase()}</p>
               <p>Receipt: {sale.id}</p>
               <p>Transaction: {receiptDate(sale.createdAt)} WAT</p>
               <p>Till: {store.deviceLabel}</p>
@@ -38,13 +38,18 @@ export function Receipt({ sale, store, onClose }: { sale: PosSale; store: StoreP
               <Row label="Subtotal" value={fmt(sale.subtotal)} />
               {sale.discount > 0 && <Row label="Discount" value={`-${fmt(sale.discount)}`} />}
               {!!sale.tax && <Row label={`${store.taxLabel || 'Tax'}${sale.taxRatePct ? ` ${sale.taxRatePct}%` : ''}`} value={fmt(sale.tax)} />}
-              <Row label="Sale total" value={fmt(sale.total)} strong />
+              <Row label={sale.kind === 'repayment' ? 'Repayment' : 'Sale total'} value={fmt(sale.total)} strong />
+              {sale.creditBalanceKobo != null && <Row label="Credit at transaction" value={fmt(sale.creditBalanceKobo)} />}
+              {sale.dueDate && <p>Due: {receiptDate(sale.dueDate)} WAT</p>}
               {payment?.feeKobo != null && <Row label="Provider charges" value={fmt(payment.feeKobo)} />}
               {payment && <Row label="Total paid" value={fmt(payment.paidKobo)} strong />}
             </section>
             <section className="receipt-section" aria-label="Payment details">
               {sale.payments.map((entry, i) => <Row key={i} label={entry.method} value={fmt(entry.amount)} />)}
-              {payment && <p>Processor: {payment.provider === 'squad' ? 'Squad' : 'Bachs'}</p>}
+              {payment && <p>Processor: {{ squad: 'Squad', bachs: 'Bachs', moniepoint: 'Moniepoint', manual: 'Manual confirmation', credit: 'Credit' }[payment.provider]}</p>}
+              {payment?.confirmationSource && <p>Confirmation: {payment.confirmationSource}</p>}
+              {payment?.actualMethod && <p>Actual method: {payment.actualMethod}</p>}
+              {payment?.account && <p>Received into: {payment.account}</p>}
               {payment?.checkoutReference && <p>Payment ref: {payment.checkoutReference}</p>}
               {payment?.confirmedAt && <p>Confirmed: {receiptDate(payment.confirmedAt)} WAT</p>}
               {sale.change > 0 && <Row label="Change" value={fmt(sale.change)} />}

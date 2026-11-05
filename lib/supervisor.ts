@@ -12,7 +12,7 @@
 import { PosSale, Shift, Cashier, PaymentMethod, PosProduct, AssistRequest } from './types';
 import { cashDropsForShift } from './assist';
 
-const METHODS: PaymentMethod[] = ['Cash', 'Transfer', 'Card', 'Credit'];
+const METHODS: PaymentMethod[] = ['Cash', 'Transfer', 'Card', 'Credit', 'Other'];
 export const dayOf = (iso: string) => iso.slice(0, 10);
 export const todayStr = () => new Date().toISOString().slice(0, 10);
 
@@ -58,7 +58,8 @@ export function cashierPerformance(
 
   return Array.from(ids).map((id) => {
     const mine = daySales.filter((s) => s.cashierId === id);
-    const positives = mine.filter((s) => !s.reversalOf);
+    const collections = mine.filter((s) => !s.reversalOf);
+    const positives = collections.filter((s) => s.kind !== 'repayment');
     const reversals = mine.filter((s) => !!s.reversalOf);
     const myShifts = dayShifts.filter((s) => s.cashierId === id);
 
@@ -72,9 +73,9 @@ export function cashierPerformance(
       amount: mine.reduce((a, s) => a + s.payments.filter((p) => p.method === method).reduce((x, p) => x + p.amount, 0), 0),
     })).filter((m) => m.amount !== 0);
 
-    const cashTaken = positives.reduce(
+    const cashTaken = collections.reduce(
       (a, s) => a + s.payments.filter((p) => p.method === 'Cash').reduce((x, p) => x + p.amount, 0), 0,
-    ) - positives.reduce((a, s) => a + s.change, 0);
+    ) - collections.reduce((a, s) => a + s.change, 0);
 
     const closed = myShifts.filter((s) => s.status === 'closed');
     const variance = closed.reduce((a, s) => a + (s.variance || 0), 0);
@@ -252,7 +253,7 @@ export function reconcileDay(
 ): DayReconciliation {
   const dayShifts = shifts.filter((s) => dayOf(s.openedAt) === day);
   const daySales = sales.filter((s) => dayOf(s.createdAt) === day);
-  const positives = daySales.filter((s) => !s.reversalOf);
+  const positives = daySales.filter((s) => !s.reversalOf && s.kind !== 'repayment');
   const reversals = daySales.filter((s) => !!s.reversalOf);
 
   const shiftRecons: ShiftRecon[] = dayShifts.map((shift) => {

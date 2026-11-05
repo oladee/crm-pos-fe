@@ -9,7 +9,7 @@ export type StoreType = 'Owned' | 'Franchise' | 'Subscriber';
 /** Roles + the permission matrix live in lib/permissions.ts (??21, ??22). */
 import type { PosRole } from './permissions';
 export type CashierRole = PosRole;
-export type PaymentMethod = 'Cash' | 'Transfer' | 'Card' | 'Credit';
+export type PaymentMethod = 'Cash' | 'Transfer' | 'Card' | 'Credit' | 'Other';
 export type SyncState = 'pending' | 'syncing' | 'synced' | 'failed';
 export type SaleStatus = 'completed' | 'refunded' | 'voided';
 
@@ -108,12 +108,20 @@ export interface PosPayment {
 }
 
 export interface PosSale {
+  kind?: 'sale' | 'repayment';
+  paymentMode?: 'full_payment' | 'partial_credit' | 'full_credit';
+  creditBalanceKobo?: number;
+  dueDate?: string;
+  creditId?: string;
   receiptPayment?: {
-    provider: 'bachs' | 'squad';
+    provider: 'bachs' | 'squad' | 'moniepoint' | 'manual' | 'credit';
     checkoutReference?: string;
     feeKobo?: number;
     paidKobo: number;
     confirmedAt?: string;
+    confirmationSource?: string;
+    actualMethod?: string;
+    account?: string;
   };
   id: string;         // client-generated ??? idempotency key
   deviceId: string;

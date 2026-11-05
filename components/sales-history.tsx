@@ -56,13 +56,14 @@ export function SalesHistory({
           {list.length === 0 && <p className="text-center text-sm text-[var(--color-ink-dim)] py-10">No sales yet.</p>}
           {list.map((s) => {
             const remaining = returnableLines(s);
-            const reversed = s.status !== 'completed' || remaining.length === 0;
+            const reversed = s.status !== 'completed' || (s.kind !== 'repayment' && remaining.length === 0);
             return (
               <div key={s.id} className={`rounded-xl bg-[var(--color-surface-2)] p-3 ${reversed ? 'opacity-60' : ''}`}>
                 <div className="flex items-start justify-between gap-2">
                   <button onClick={() => onView(s)} className="text-left min-w-0 flex-1">
                     <p className="text-sm font-black">
                       {fmt(s.total)}
+                      {s.kind === 'repayment' && <span className="ml-2 text-[10px] uppercase">Credit repayment</span>}
                       {reversed && <span className="ml-2 text-[10px] uppercase font-black text-[var(--color-danger)]">{s.status}</span>}
                     </p>
                     <p className="text-[11px] text-[var(--color-ink-dim)]">
@@ -75,11 +76,11 @@ export function SalesHistory({
                     {stateChip(s)}
                     {!reversed && (
                       <div className="flex gap-1 justify-end">
-                        {canRefund && <button onClick={() => onRefund(s)} title="Refund"
+                        {canRefund && s.kind !== 'repayment' && <button onClick={() => onRefund(s)} title="Refund"
                           className="h-7 px-2 rounded-md border border-[var(--color-line)] text-[10px] font-bold inline-flex items-center gap-1 hover:border-amber-400 hover:text-amber-300">
                           <RotateCcw size={10} /> Refund
                         </button>}
-                        {canVoid && <button onClick={() => onVoid(s)} title="Void"
+                        {canVoid && s.kind !== 'repayment' && <button onClick={() => onVoid(s)} title="Void"
                           className="h-7 px-2 rounded-md border border-[var(--color-line)] text-[10px] font-bold inline-flex items-center gap-1 hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]">
                           <Ban size={10} /> Void
                         </button>}

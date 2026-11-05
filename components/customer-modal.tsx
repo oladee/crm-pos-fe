@@ -5,9 +5,10 @@ import { toast } from 'sonner';
 import { X } from 'lucide-react';
 import { PosCustomer } from '@/lib/types';
 import { createPosCustomer, searchPosCustomers } from '@/lib/remote';
+import { saveCustomers } from '@/lib/db';
 
 export function CustomerModal({
-  hubId, customers, onPick, onClear, onClose,
+  hubId, customers, onPick, onClose,
 }: {
   hubId?: string;
   customers: PosCustomer[];
@@ -46,10 +47,11 @@ export function CustomerModal({
   }, [name, phone, hubId, customers]);
 
   const saveNew = async () => {
-    if (!name.trim() || !phone.trim() || busy) return;
+    if (!name.trim() || busy) return;
     setBusy(true);
     try {
-      const created = await createPosCustomer({ name: name.trim(), phone: phone.trim() });
+      const created = await createPosCustomer({ name: name.trim(), ...(phone.trim() ? { phone: phone.trim() } : {}) });
+      await saveCustomers([created]);
       onPick(created);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not save this customer');
@@ -62,12 +64,14 @@ export function CustomerModal({
       <div className="w-full max-w-sm rounded-2xl bg-[var(--color-surface)] border border-[var(--color-line)] overflow-hidden">
         <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between">
           <h2 className="font-black">Customer</h2>
-          <button onClick={onClose} className="text-[var(--color-ink-dim)]"><X size={20} /></button>
+          <button aria-label="Close customer" onClick={onClose} className="h-11 w-11 grid place-items-center text-[var(--color-ink-dim)]"><X size={20} /></button>
         </div>
         <div className="space-y-2 p-3">
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name"
+          <label className="block text-sm font-bold">Customer name (required)</label>
+          <input aria-label="Customer name" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Name"
             className="w-full h-11 px-3 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)] text-sm outline-none focus:border-[var(--color-brand)]" />
-          <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone" inputMode="tel"
+          <label className="block text-sm font-bold">Phone (optional)</label>
+          <input aria-label="Phone (optional)" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (optional)" inputMode="tel"
             className="w-full h-11 px-3 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)] text-sm outline-none focus:border-[var(--color-brand)]" />
         </div>
         <div className="max-h-56 overflow-y-auto px-3 pb-3 space-y-1.5">
@@ -84,11 +88,10 @@ export function CustomerModal({
           )}
         </div>
         <div className="space-y-2 border-t border-[var(--color-line)] p-3">
-          <button type="button" disabled={busy || !name.trim() || !phone.trim()} onClick={() => void saveNew()}
+          <button type="button" disabled={busy || !name.trim()} onClick={() => void saveNew()}
             className="primary-action h-10 w-full rounded-lg text-xs font-black disabled:opacity-40">
             {busy ? 'Saving…' : 'Save as new customer'}
           </button>
-          <button onClick={onClear} className="w-full h-10 rounded-lg border border-[var(--color-line)] text-xs font-bold text-[var(--color-ink-dim)]">Walk-in (no customer)</button>
         </div>
       </div>
     </div>

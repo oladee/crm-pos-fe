@@ -27,7 +27,7 @@ export interface ShiftReport {
   topProducts: { name: string; qty: number; amount: number }[];
 }
 
-const METHODS: PaymentMethod[] = ['Cash', 'Transfer', 'Card', 'Credit'];
+const METHODS: PaymentMethod[] = ['Cash', 'Transfer', 'Card', 'Credit', 'Other'];
 
 /** Sales that belong to a shift (reversals included ??? they carry negative amounts). */
 export const salesForShift = (sales: PosSale[], shiftId: string) => sales.filter((s) => s.shiftId === shiftId);
@@ -35,7 +35,7 @@ export const salesForShift = (sales: PosSale[], shiftId: string) => sales.filter
 export function buildReport(shift: Shift, sales: PosSale[], countedCash?: number, cashDrops = 0): ShiftReport {
   const mine = salesForShift(sales, shift.id);
   // A reversal record has reversalOf set and negative totals.
-  const positives = mine.filter((s) => !s.reversalOf);
+  const positives = mine.filter((s) => !s.reversalOf && s.kind !== 'repayment');
   const reversals = mine.filter((s) => !!s.reversalOf);
 
   const grossSales = positives.reduce((a, s) => a + s.total, 0);
@@ -47,8 +47,9 @@ export function buildReport(shift: Shift, sales: PosSale[], countedCash?: number
     return { method, amount, count };
   }).filter((m) => m.count > 0);
 
-  const cashSales = positives.reduce((a, s) => a + s.payments.filter((p) => p.method === 'Cash').reduce((x, p) => x + p.amount, 0), 0)
-    - positives.reduce((a, s) => a + s.change, 0); // change handed back leaves the drawer
+  const collections = mine.filter((s) => !s.reversalOf);
+  const cashSales = collections.reduce((a, s) => a + s.payments.filter((p) => p.method === 'Cash').reduce((x, p) => x + p.amount, 0), 0)
+    - collections.reduce((a, s) => a + s.change, 0); // change handed back leaves the drawer
   const cashRefunds = Math.abs(reversals.reduce((a, s) => a + s.payments.filter((p) => p.method === 'Cash').reduce((x, p) => x + p.amount, 0), 0));
   const expectedCash = shift.openingFloat + cashSales - cashRefunds - cashDrops;
 

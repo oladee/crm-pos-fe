@@ -100,7 +100,7 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
     setStockCounts(Object.fromEntries(counts.map((c) => [c.day, c.counts])));
     setAssists(asks);
     const t = new Date().toISOString().slice(0, 10);
-    setTodayCount(allSales.filter((s) => s.createdAt.slice(0, 10) === t && !s.reversalOf).length);
+    setTodayCount(allSales.filter((s) => s.createdAt.slice(0, 10) === t && !s.reversalOf && s.kind !== 'repayment').length);
   }, []);
 
   useEffect(() => {
