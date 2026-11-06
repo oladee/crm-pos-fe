@@ -16,9 +16,10 @@ body:has(> .thermal-document) > :not(.thermal-document) { display: none; }
 .receipt-total { font-weight: 800; font-size: 13px; }
 @media print {
   @page { size: auto; margin: 0; }
-  html, body { width: 58mm !important; min-width: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; }
+  html, body { width: auto !important; min-width: 0 !important; height: auto !important; margin: 0 !important; padding: 0 !important; overflow: visible !important; background: #fff !important; }
   body > :not(.receipt-overlay) { display: none !important; }
   .receipt-overlay, .receipt-shell, .receipt-preview { display: block !important; position: static !important; width: 58mm !important; max-width: none !important; height: auto !important; max-height: none !important; overflow: visible !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; background: #fff !important; }
+  .receipt-overlay { margin-inline: auto !important; }
   .receipt-controls { display: none !important; }
   .receipt-paper { padding: 3mm 0 8mm; }
   .receipt-paper * { color: #000 !important; border-color: #000 !important; }
