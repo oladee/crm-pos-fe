@@ -83,7 +83,7 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
   const [sales, setSales] = useState<PosSale[]>([]);
   const [held, setHeld] = useState<HeldSale[]>([]);
   const [actingSupervisor, setActingSupervisor] = useState<string | null>(null);
-  const [online, setOnline] = useState(true);
+  const [online, setOnline] = useState(() => typeof navigator === 'undefined' ? true : navigator.onLine);
   const [pending, setPending] = useState(0);
   const [syncing, setSyncing] = useState(false);
   const [todayCount, setTodayCount] = useState(0);
@@ -106,25 +106,28 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     (async () => {
       let s = await ensureSeeded();
-      let access: 'enroll' | 'passkey' | 'legacy' = s.credentialId ? 'passkey' : 'enroll';
+      let access: 'enroll' | 'passkey' | 'legacy' = s.verifiedDeviceAccess || (s.credentialId ? 'passkey' : 'enroll');
       try {
+        if (!navigator.onLine) throw new Error('offline');
         const status = await fetchDeviceStatus(s.deviceId);
         if (!status.registered) {
           access = 'enroll';
           sessionStorage.removeItem(CASHIER_KEY);
           clearPinToken();
           delete s.credentialId;
+          delete s.verifiedDeviceAccess;
           await saveStore(s);
         } else {
           access = status.passkey ? 'passkey' : 'legacy';
+          if (s.verifiedDeviceAccess !== access) { s = { ...s, verifiedDeviceAccess: access }; await saveStore(s); }
         }
       } catch {
-        access = s.credentialId ? 'passkey' : 'enroll';
+        access = s.verifiedDeviceAccess || (s.credentialId ? 'passkey' : 'enroll');
       }
       setDeviceAccess(access);
       try {
         const hubId = s.hubId || s.storeId;
-        if (hubId && access !== 'enroll') {
+        if (hubId && access !== 'enroll' && navigator.onLine) {
           const [staff, remoteCatalog] = await Promise.all([
             fetchStaff(hubId, s.deviceId),
             fetchCatalog(hubId, s.deviceId),
@@ -156,7 +159,6 @@ export function TillProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
-    setOnline(navigator.onLine);
     const on = () => setOnline(true);
     const off = () => setOnline(false);
     window.addEventListener('online', on);

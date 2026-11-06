@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import {
-  X, Users, Scale, AlertTriangle, CheckCircle2, Clock, CloudOff, Printer,
+  ArrowLeft, Users, Scale, AlertTriangle, CheckCircle2, Clock, CloudOff, Printer,
   TrendingUp, Receipt, Percent, RotateCcw, ShieldCheck, ChevronDown, ChevronUp,
   ListOrdered, Boxes, Search, Cloud, Loader2, Save, LifeBuoy, LayoutDashboard,
   ArrowRight,
@@ -17,6 +17,7 @@ import {
 } from '@/lib/supervisor';
 import { fmt } from '@/lib/money';
 import { ThemeToggle } from './theme-provider';
+import { ManagerPrint } from './manager-print';
 
 type Tab = 'overview' | 'assist' | 'cashiers' | 'transactions' | 'stock' | 'reconcile';
 
@@ -39,6 +40,7 @@ export function SupervisorView({
   const [tab, setTab] = useState<Tab>(waiting > 0 ? 'assist' : 'overview');
   const [day, setDay] = useState(todayStr());
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [printPreview, setPrintPreview] = useState(false);
   const navRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
@@ -69,9 +71,11 @@ export function SupervisorView({
     ['reconcile', 'Reconciliation', Scale, recon.openShifts || undefined],
   ] as [Tab, string, typeof Users, number | undefined][];
 
+  if (printPreview) return <ManagerPrint store={store} day={day} recon={recon} perf={perf} stock={stock} transactions={dayTxns} unsynced={unsynced} onBack={() => setPrintPreview(false)} />;
+
   return (
-    <div className="manager-shell fixed inset-0 z-50 flex min-h-[100dvh] flex-col bg-[var(--color-bg)]">
-      <header className="manager-header flex min-h-[72px] shrink-0 items-center justify-between gap-3 px-3 sm:px-5">
+    <div className="manager-shell flex min-h-dvh flex-col bg-[var(--color-bg)]">
+      <header className="manager-header flex min-h-[72px] shrink-0 flex-wrap items-center justify-between gap-3 px-3 py-2 sm:px-5">
         <div className="flex min-w-0 items-center gap-3">
           <div className="salesos-logo-frame hidden shrink-0 sm:block">
             <Image src="/salesos-logo.svg" alt="SalesOS by Fudfarmer" width={596} height={183} className="h-auto w-[104px]" priority />
@@ -85,21 +89,21 @@ export function SupervisorView({
           </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <label className="hidden text-[11px] font-bold text-[var(--color-ink-dim)] md:block" htmlFor="manager-date">Trading date</label>
           <input id="manager-date" type="date" value={day} onChange={(e) => setDay(e.target.value)}
             className="manager-control h-10 w-[110px] px-2 text-[11px] outline-none sm:w-[150px] sm:text-xs" />
           <ThemeToggle compact />
-          <button aria-label="Print manager report" title="Print report" onClick={() => window.print()} className="manager-icon-button manager-print-button">
+          <button aria-label="Print manager report" title="Print report" onClick={() => setPrintPreview(true)} className="manager-icon-button manager-print-button">
             <Printer size={16} />
           </button>
-          <button aria-label="Back to point of sale" title="Back to POS" onClick={onClose} className="manager-icon-button"><X size={18} /></button>
+          <button onClick={onClose} className="inline-flex min-h-11 items-center gap-2 text-sm font-bold"><ArrowLeft size={18} />Back to POS</button>
         </div>
       </header>
 
-      <div className="min-h-0 flex-1 md:grid md:grid-cols-[224px_minmax(0,1fr)]">
+      <div className="flex-1 md:grid md:grid-cols-[224px_minmax(0,1fr)]">
         <aside className="manager-sidebar border-b border-[var(--color-line)] md:border-b-0 md:border-r">
-          <nav ref={navRef} aria-label="Manager sections" className="manager-nav flex gap-1 overflow-x-auto p-2 md:flex-col md:gap-1 md:p-3">
+          <nav ref={navRef} aria-label="Manager sections" className="manager-nav flex flex-wrap gap-1 p-2 md:flex-col md:gap-1 md:p-3">
             {nav.map(([k, label, Icon, count]) => (
               <button key={k} onClick={() => setTab(k)} data-active={tab === k}
                 className={`manager-nav-item ${k === 'assist' && waiting > 0 ? 'manager-nav-urgent' : ''}`}>
@@ -120,7 +124,7 @@ export function SupervisorView({
           </div>
         </aside>
 
-        <main className="min-h-0 overflow-y-auto">
+        <main className="min-w-0">
           <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 sm:py-7">
             {tab === 'overview' && <OverviewTab perf={perf} recon={recon} stock={stock} waiting={waiting} setTab={setTab} />}
             {tab === 'assist' && <AssistQueue assists={assists} catalog={catalog} onClaim={onClaimAssist} onResolve={onResolveAssist} onCancel={onCancelAssist} />}

@@ -6,16 +6,26 @@ const Module = require('node:module');
 const ts = require('typescript');
 const filename = path.resolve(__dirname, '../lib/shift.ts');
 const compiled = new Module(filename, module);
-compiled._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, filename);
+compiled._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText, filename);
 const { buildReport } = compiled.exports;
 function loadTypeScript(name) {
   const file = path.resolve(__dirname, `../lib/${name}.ts`);
   const loaded = new Module(file, module);
   loaded.require = id => id === './assist' ? loadTypeScript('assist') : require(id);
-  loaded._compile(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, file);
+  loaded._compile(ts.transpileModule(fs.readFileSync(file, 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText, file);
   return loaded.exports;
 }
 const { cashierPerformance, reconcileDay } = loadTypeScript('supervisor');
+const { printableLines, receiptQuantity } = loadTypeScript('receipt');
+
+test('receipt quantities combine FIFO splits and use supported unit precision', () => {
+  const line = { productId: 'rice', name: 'Rice', unit: 'Kg', qty: 0.004, unitPrice: 10000, lineTotal: 40, discount: 0 };
+  const merged = printableLines([line, { ...line, qty: 0.006, lineTotal: 60 }]);
+  assert.equal(merged.length, 1); assert.equal(merged[0].lineTotal, 100);
+  assert.equal(receiptQuantity(merged[0].qty, 'Kg'), '0.01');
+  assert.equal(receiptQuantity(0.333, 'Liters'), '0.333');
+  assert.equal(receiptQuantity(0.1 + 0.2, 'Units'), '0.3');
+});
 
 test('credit and repayments separate sales value, debt and money in the drawer', () => {
   const common = { createdAt: '2026-11-05T10:00:00Z', cashierId: 'cashier', shiftId: 'shift', change: 0, discount: 0, lines: [] };

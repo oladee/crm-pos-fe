@@ -15,6 +15,13 @@ const payment = {
 
 async function prepare(page: Page, overrides: Record<string, unknown> = {}, fail = false, openTransfer = true) {
   let confirmations = 0;
+  let paid = overrides.status === 'paid';
+  const receiptSale = { ...payment.sale.posSale, syncState: 'synced', origin: { storeName: 'Lagos Store', deviceLabel: 'Till 1' },
+    receiptPayment: { provider: 'squad', checkoutReference: payment.checkoutId, feeKobo: payment.feeKobo, paidKobo: payment.payableKobo, confirmedAt: '2026-10-31T09:05:00.000Z' } };
+  const transactionRow = (sale: Record<string, unknown>) => ({ reference: sale.id, kind: 'sale', status: 'completed', createdAt: sale.createdAt,
+    locationId: 'hub-test', locationName: 'Lagos Store', tillName: 'Till 1', customerName: sale.customerName, cashierName: sale.cashierName,
+    cashierId: 'cashier-test', deviceId: 'device-test', totalKobo: sale.total, receipt: sale, checkoutId: null, legacyTransferId: null,
+    actions: { viewReceipt: true, printReceipt: true, refund: false, void: false } });
   await page.route('**/pos/**', async route => {
     const url = new URL(route.request().url());
     let body: unknown = { data: [] }, status = 200;
@@ -22,13 +29,24 @@ async function prepare(page: Page, overrides: Record<string, unknown> = {}, fail
     else if (url.pathname.endsWith('/catalog')) body = { data: [{ id: 'product-test', name: 'Rice SKU', sku: 'RICE', category: 'Grains', unit: 'Units', price: 10000, stock: 10, trackStock: true, isActive: true, batches: [{ batchNumber: 'old', quantityRemaining: 3, unitPrice: 1 }, { batchNumber: 'new', quantityRemaining: 7, unitPrice: 99999 }] }] };
     else if (url.pathname.endsWith('/sales/quote')) body = { subtotal: 10000, total: 10000, discount: 0, tax: 0 };
     else if (url.pathname.endsWith('/payments/options')) body = { providers: [{ id: 'squad', name: 'Squad' }], manualConfirmationEnabled: true };
+    else if (url.pathname.endsWith('/checkouts/options')) body = { methods: [{ id: 'manual', available: true }, { id: 'moniepoint', available: false }, { id: 'squad', available: false }] };
+    else if (url.pathname.endsWith('/checkouts')) body = { data: [], nextCursor: null };
     else if (url.pathname.endsWith('/confirm-received')) {
-      confirmations++;
+      confirmations++; if (!fail) paid = true;
       status = fail ? 503 : 200;
       body = fail ? { message: 'Please retry payment confirmation' } : { ...payment, ...overrides, status: 'paid', confirmedAt: '2026-10-31T09:05:00.000Z', reservationState: 'consumed', canConfirmReceived: false };
     } else if (url.pathname.endsWith('/payments/transfers/test-payment-reference')) {
+      if (overrides.refreshStatus === 'paid') paid = true;
       body = { ...payment, ...overrides, status: overrides.refreshStatus || 'awaiting', confirmedAt: '2026-10-31T09:05:00.000Z' };
     } else if (url.pathname.endsWith('/payments/transfers')) body = { data: [{ ...payment, ...overrides }] };
+    else if (url.pathname.includes('/transactions')) {
+      const local = await page.evaluate(async () => {
+        const db = await new Promise<IDBDatabase>(resolve => { const request = indexedDB.open('fudfarmer-pos', 4); request.onsuccess = () => resolve(request.result); });
+        const sales = await new Promise<Record<string, unknown>[]>(resolve => { const request = db.transaction('sales').objectStore('sales').getAll(); request.onsuccess = () => resolve(request.result); }); db.close(); return sales;
+      });
+      const rows = local.map(transactionRow); if (paid && !rows.some(row => row.reference === payment.clientSaleId)) rows.push(transactionRow(receiptSale));
+      body = url.pathname.endsWith('/transactions') ? { data: rows, nextCursor: null } : rows.find(row => row.reference === url.pathname.split('/').pop());
+    }
     else if (url.pathname.endsWith('/staff')) body = { data: [{ id: 'cashier-test', name: 'Test Cashier', email: 'cashier@example.com', role: 'cashier', isActive: true }] };
     await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   });
@@ -101,7 +119,7 @@ test('confirmed payment receipt prints only 48 mm content and reopens from histo
   await page.getByRole('button', { name: 'I have received payment' }).click();
   await page.getByRole('button', { name: 'Confirm payment received', exact: true }).click();
   await page.getByRole('button', { name: 'View receipt' }).click();
-  const receipt = page.getByRole('dialog', { name: 'Transaction receipt' });
+  const receipt = page.locator('section[aria-label="Transaction receipt"]');
   await expect(receipt.getByText('Processor: Squad')).toBeVisible();
   await expect(receipt.getByText(/Confirmed:/)).toContainText('10:05');
   await expect(receipt.getByText(/Transaction:/)).toContainText('10:00');
@@ -120,10 +138,10 @@ test('confirmed payment receipt prints only 48 mm content and reopens from histo
   expect(await paper.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('thermal-receipt.png'), fullPage: true });
   await page.emulateMedia({ media: 'screen' });
-  await receipt.getByRole('button', { name: 'Close receipt' }).click();
+  await receipt.getByRole('button', { name: 'Back to transactions' }).click();
   await page.goto('/history');
-  await page.getByRole('button').filter({ hasText: '#test-payment-reference' }).click();
-  await expect(page.getByRole('dialog', { name: 'Transaction receipt' }).getByText('Processor: Squad')).toBeVisible();
+  await page.locator('article').filter({ hasText: '#test-payment-reference' }).getByRole('link', { name: 'View receipt' }).click();
+  await expect(page.locator('section[aria-label="Transaction receipt"]').getByText('Processor: Squad')).toBeVisible();
   expect(await page.evaluate(async () => {
     const db = await new Promise<IDBDatabase>(resolve => { const r = indexedDB.open('fudfarmer-pos', 4); r.onsuccess = () => resolve(r.result); });
     const rows = await new Promise<unknown[]>(resolve => { const r = db.transaction('sales').objectStore('sales').getAll(); r.onsuccess = () => resolve(r.result); });
@@ -135,7 +153,7 @@ test('webhook-confirmed status offers a receipt without opening a modal over the
   await prepare(page, { refreshStatus: 'paid' });
   await page.getByRole('button', { name: 'Check status' }).click();
   await expect(page.getByRole('button', { name: 'View receipt' })).toBeVisible();
-  await expect(page.getByRole('dialog', { name: 'Transaction receipt' })).toHaveCount(0);
+  await expect(page.locator('section[aria-label="Transaction receipt"]')).toHaveCount(0);
   await page.getByRole('button', { name: 'View receipt' }).click();
   await expect(page.getByText('Processor: Squad')).toBeVisible();
 });
@@ -157,7 +175,7 @@ test('long receipts and legacy sales fit without scroll clipping in print', asyn
     await new Promise<void>(resolve => { t.oncomplete = () => resolve(); }); db.close();
   });
   await page.goto('/history');
-  await page.getByRole('button').filter({ hasText: '#legacy-long-receipt' }).click();
+  await page.locator('article').filter({ hasText: '#legacy-long-receipt' }).getByRole('link', { name: 'View receipt' }).click();
   await expect(page.getByText('Processor: Squad')).toHaveCount(0);
   await page.emulateMedia({ media: 'print' });
   const paper = page.locator('.receipt-paper');
@@ -169,11 +187,12 @@ test('long receipts and legacy sales fit without scroll clipping in print', asyn
 
 test('paid receipt recovery is idempotent across reloads', async ({ page }) => {
   await prepare(page, { status: 'paid', confirmedAt: '2026-10-31T09:05:00Z' }, false, false);
-  await expect(page.getByRole('button', { name: 'View receipt' })).toBeVisible();
+  // Historical confirmations restore silently instead of implying a new payment.
+  await expect(page.getByRole('button', { name: 'View receipt' })).toHaveCount(0);
   await page.reload();
   await expect(page.getByTitle('Bank transfers waiting for payment')).toBeVisible();
   await expect(page.getByRole('button', { name: 'View receipt' })).toHaveCount(0);
   await page.goto('/history');
-  await page.getByRole('button').filter({ hasText: '#test-payment-reference' }).click();
+  await page.locator('article').filter({ hasText: '#test-payment-reference' }).getByRole('link', { name: 'View receipt' }).click();
   await expect(page.getByText('Processor: Squad')).toBeVisible();
 });

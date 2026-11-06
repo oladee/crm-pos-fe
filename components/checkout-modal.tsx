@@ -88,7 +88,9 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
             <button disabled={!options.methods.find(m => m.id === 'moniepoint')?.available} className={actionStyle} onClick={() => void start('moniepoint', 'card')}>Moniepoint card</button>
             <button disabled={!options.methods.find(m => m.id === 'moniepoint')?.available} className={actionStyle} onClick={() => void start('moniepoint', 'transfer')}>Moniepoint transfer</button>
           </div>
+          {!options.methods.find(m => m.id === 'moniepoint')?.available && <p className="text-sm">{options.methods.find(m => m.id === 'moniepoint')?.reason || 'No Moniepoint terminal configured for this till.'}</p>}
           <button disabled={!options.methods.find(m => m.id === 'squad')?.available} className={actionStyle} onClick={() => void start('squad', 'transfer')}>Squad transfer</button>
+          {!options.methods.find(m => m.id === 'squad')?.available && <p className="text-sm">{options.methods.find(m => m.id === 'squad')?.reason || 'Squad is not configured.'}</p>}
         </fieldset>
         <p className="text-xs text-[var(--color-ink-dim)]">Unavailable providers are not configured for this till. You can still confirm money you have received.</p>
         <button disabled={busy} className={actionStyle} onClick={() => void run(async () => { const next = await ensureCheckout(); setReceived(String(next.dueKobo / 100)); setManual(true); })}>Confirm payment received</button>

@@ -9,22 +9,21 @@ import {
   Loader2, User, FileText, PauseCircle, PlayCircle, ShieldCheck, LifeBuoy,
   Settings as Cog, Menu, ChevronRight, Clock, Check, Smartphone,
 } from 'lucide-react';
-import { PosProduct, PosCustomer, PosSale, PosPayment, HeldSale, IssueType } from '@/lib/types';
+import { PosProduct, PosCustomer, PosSale, HeldSale, IssueType } from '@/lib/types';
 import { recordSale, saveHeld, deleteHeld, saveAssist, replaceCatalog } from '@/lib/db';
 import { flushOutbox } from '@/lib/sync';
-import { CartLine, computeTotals, cartCount, lineKey, lineTotal, toSaleLines, newSaleId, changeDue, pctToAmount, maxDiscountPctInCart } from '@/lib/cart';
-import { fetchCatalog, quoteSale, startPosTransfer, listPosTransfers, refreshPosTransfer, cancelPosTransfer, confirmPosTransferReceived, submitPosSale, type PosTransfer } from '@/lib/remote';
+import { CartLine, computeTotals, cartCount, lineKey, lineTotal, toSaleLines, newSaleId, pctToAmount, maxDiscountPctInCart } from '@/lib/cart';
+import { fetchCatalog, quoteSale, listPosTransfers, refreshPosTransfer, cancelPosTransfer, confirmPosTransferReceived, type PosTransfer } from '@/lib/remote';
 import { buildReport, ShiftReport } from '@/lib/shift';
 import { fmt } from '@/lib/money';
-import { Receipt } from '@/components/receipt';
+import { cacheReceipt } from '@/lib/transactions';
 import { CheckoutModal } from '@/components/checkout-modal';
-import { CheckoutActivity, RepayCreditModal } from '@/components/checkout-activity';
+import { RepayCreditModal } from '@/components/checkout-activity';
 import { checkoutOptions, type Checkout, type CheckoutOptions } from '@/lib/checkouts';
 import { recoverCheckoutReceipts } from '@/lib/checkout-history';
 import { confirmedTransferSale } from '@/lib/receipt';
 import { ReportModal, PinGate } from '@/components/shift-panels';
 import { RequestHelpModal, MyRequests } from '@/components/assist-panels';
-import { PaymentModal } from '@/components/payment-modal';
 import { TransferPanel, TransferQueue } from '@/components/transfer-panel';
 import { DiscountModal } from '@/components/discount-modal';
 import { HeldModal } from '@/components/held-modal';
@@ -69,7 +68,20 @@ function SellScreen() {
     return () => { window.clearInterval(timer); window.removeEventListener('focus', refreshAvailability); };
   }, [refreshAvailability]);
 
-  const [lines, setLines] = useState<CartLine[]>([]);
+  const draftKey = `pos.cart.${store?.deviceId}:${store?.hubId || store?.storeId}:${cashier?.id}:${shift?.id}`;
+  const [draft] = useState<{ lines: CartLine[]; customer: PosCustomer | null; orderDiscount: number }>(() => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(draftKey) || 'null');
+      if (saved && Array.isArray(saved.lines) && saved.lines.every((line: CartLine) =>
+        line?.product && typeof line.product.id === 'string' && Number.isFinite(line.qty) && line.qty > 0 &&
+        Number.isSafeInteger(line.unitPrice) && line.unitPrice >= 0 && Number.isSafeInteger(line.discount) && line.discount >= 0 && typeof line.saleUnit === 'string')) {
+        return { lines: saved.lines, customer: typeof saved.customer?.id === 'string' && typeof saved.customer?.name === 'string' ? saved.customer : null,
+          orderDiscount: Number.isSafeInteger(saved.orderDiscount) && saved.orderDiscount >= 0 ? saved.orderDiscount : 0 };
+      }
+    } catch { /* A damaged local draft must not prevent opening the till. */ }
+    return { lines: [], customer: null, orderDiscount: 0 };
+  });
+  const [lines, setLines] = useState<CartLine[]>(draft.lines);
   useEffect(() => {
     setLines(current => {
       let changed = false;
@@ -87,12 +99,15 @@ function SellScreen() {
 
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
-  const [customer, setCustomer] = useState<PosCustomer | null>(null);
-  const [orderDiscount, setOrderDiscount] = useState(0);
+  const [customer, setCustomer] = useState<PosCustomer | null>(draft.customer);
+  const [orderDiscount, setOrderDiscount] = useState(draft.orderDiscount);
+  useEffect(() => {
+    sessionStorage.setItem(draftKey, JSON.stringify({ lines, customer: customer ? { id: customer.id, name: customer.name } : null, orderDiscount }));
+  }, [draftKey, lines, customer, orderDiscount]);
   const [discountFor, setDiscountFor] = useState<string | 'cart' | null>(null);
   const [discountApproved, setDiscountApproved] = useState(false);
   const [discountGate, setDiscountGate] = useState(false);
-  const [showPay, setShowPay] = useState(false);
+
   const [showCustomers, setShowCustomers] = useState(false);
   const [lastSale, setLastSale] = useState<PosSale | null>(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -112,26 +127,34 @@ function SellScreen() {
   const [showCheckout, setShowCheckout] = useState(false);
   const [activeCheckout, setActiveCheckout] = useState<Checkout | null>(null);
   const [checkoutCart, setCheckoutCart] = useState<Record<string, unknown> | undefined>();
-  const [checkoutActivity, setCheckoutActivity] = useState(false);
+
   const [repayingCredit, setRepayingCredit] = useState(false);
   const [customerIntent, setCustomerIntent] = useState<'checkout' | 'repay' | null>(null);
   const completedCheckouts = useRef(new Set<string>());
-  useEffect(() => { if (online && cashier) void checkoutOptions().then(setV2Options).catch(() => setV2Options(null)); }, [online, cashier?.id]);
+  const receiptBaseline = useRef(false);
+  const [optionsError, setOptionsError] = useState('');
+  const [optionsRetry, setOptionsRetry] = useState(0);
   useEffect(() => {
-    if (!online || !v2Options?.enabled) return;
+    if (!lastSale) return;
+    const receipt = lastSale;
+    void cacheReceipt(receipt).then(() => { setLastSale(null); router.push('/history/' + encodeURIComponent(receipt.id)); }).catch(() => toast.error('Could not open receipt. Retry from Transactions.'));
+  }, [lastSale, router]);
+  useEffect(() => { if (online && cashier) { void checkoutOptions().then(options => { setOptionsError(''); setV2Options(options); }).catch(() => { setV2Options(null); setOptionsError('Could not load checkout settings.'); }); } }, [online, cashier?.id, optionsRetry]);
+  useEffect(() => {
+    if (!online || !v2Options) return;
     let active = true, running = false;
     const recover = async () => { if (running) return; running = true;
-      try { const receipts = await recoverCheckoutReceipts(); if (!active) return;
+      try { const receipts = await recoverCheckoutReceipts(store?.deviceId || ''); if (!active) return;
         for (const receipt of receipts) if (!sales.some(sale => sale.id === receipt.id) && !completedCheckouts.current.has(receipt.id)) {
           completedCheckouts.current.add(receipt.id);
-          toast.success(receipt.kind === 'repayment' ? 'Credit repayment received' : 'Checkout recorded', { action: { label: 'View receipt', onClick: () => { setShowCheckout(false); setLastSale(receipt); } } });
+          if (receiptBaseline.current) toast.success(receipt.kind === 'repayment' ? `Credit repayment received: ${receipt.customerName || 'Customer'} · #${receipt.id}` : `Payment received: ${receipt.customerName || 'Customer'} · #${receipt.id}`, { action: { label: 'View receipt', onClick: () => { setShowCheckout(false); setLastSale(receipt); } } });
         }
-        await refreshSyncState();
+        receiptBaseline.current = true; await refreshSyncState();
       } catch { /* Existing receipts remain available offline. */ } finally { running = false; }
     };
     void recover(); const timer = setInterval(() => void recover(), 15000);
     return () => { active = false; clearInterval(timer); };
-  }, [online, v2Options?.enabled, store?.deviceId]);
+  }, [online, Boolean(v2Options), store?.deviceId]);
   const settlingTransfers = useRef(new Set<string>());
   const notifiedTransfers = useRef(new Set<string>());
 
@@ -205,7 +228,7 @@ function SellScreen() {
   const setQty = (key: string, qty: number) =>
     setLines((cur) => qty <= 0 ? cur.filter((l) => lineKey(l) !== key) : cur.map((l) => lineKey(l) === key ? { ...l, qty } : l));
   const removeLine = (key: string) => setLines((cur) => cur.filter((l) => lineKey(l) !== key));
-  const clearCart = () => { setLines([]); setCustomer(null); setOrderDiscount(0); setDiscountApproved(false); };
+  const clearCart = () => { sessionStorage.removeItem(draftKey); setLines([]); setCustomer(null); setOrderDiscount(0); setDiscountApproved(false); };
 
   const applyDiscount = (targetId: string | 'cart', amount: number) => {
     const cap = store?.maxDiscountPct ?? 100;
@@ -225,14 +248,15 @@ function SellScreen() {
 
   const beginPayment = (selectedCustomer = customer) => {
     if (needsDiscountApproval && !discountApproved) { setDiscountGate(true); return; }
-    if (v2Options?.enabled) {
+    if (v2Options) {
       setCheckoutCart({ clientSaleId: newSaleId(store!.deviceId), customerId: selectedCustomer!.id, customerName: selectedCustomer!.name,
         hubId: store!.hubId || store!.storeId, deviceId: store!.deviceId, shiftId: shift?.id, total,
         orderDiscount, lines: toSaleLines(lines).map(line => ({ productId: line.productId, qty: line.qty, saleUnit: line.saleUnit, discount: line.discount })) });
       setActiveCheckout(null); setShowCheckout(true);
-    } else setShowPay(true);
+    } else toast.error('Checkout settings are unavailable. Use Retry to reload them.');
   };
   const startCheckout = () => {
+    if (!online) { toast.error('Connect to validate stock and continue to payment.'); return; }
     if (!customer) { setCustomerIntent('checkout'); setShowCustomers(true); return; }
     beginPayment();
   };
@@ -241,12 +265,12 @@ function SellScreen() {
     if (!sup) { toast.error('That PIN cannot approve discounts'); return; }
     setDiscountApproved(true);
     setDiscountGate(false);
-    if (v2Options?.enabled) {
+    if (v2Options) {
       setCheckoutCart({ clientSaleId: newSaleId(store!.deviceId), customerId: customer!.id, customerName: customer!.name,
         hubId: store!.hubId || store!.storeId, deviceId: store!.deviceId, shiftId: shift?.id, total, orderDiscount,
         lines: toSaleLines(lines).map(line => ({ productId: line.productId, qty: line.qty, saleUnit: line.saleUnit, discount: line.discount })) });
       setActiveCheckout(null); setShowCheckout(true);
-    } else setShowPay(true);
+    } else toast.error('Checkout settings are unavailable. Use Retry to reload them.');
     toast.success(`Discount authorised by ${sup.name.split(' (')[0]}`);
   };
 
@@ -257,7 +281,7 @@ function SellScreen() {
     });
   };
 
-  const settleTransfer = async (transfer: PosTransfer) => {
+  const settleTransfer = async (transfer: PosTransfer, notify = true) => {
     if (transfer.status !== 'paid') {
       rememberTransfer(transfer);
       setActiveTransfer((current) => current?.clientSaleId === transfer.clientSaleId ? transfer : current);
@@ -268,85 +292,22 @@ function SellScreen() {
     try {
       const recorded = confirmedTransferSale(transfer);
       if (recorded) {
-        await recordSale(recorded);
+        await cacheReceipt(recorded);
+        if (recorded.deviceId === store?.deviceId) await recordSale(recorded);
         await refreshSyncState();
         void flushOutbox().then(refreshSyncState);
       }
       setTransfers((current) => current.filter((row) => row.clientSaleId !== transfer.clientSaleId));
       setActiveTransfer(current => current?.clientSaleId === transfer.clientSaleId ? null : current);
       await refreshAvailability();
-      if (!sales.some(row => row.id === transfer.clientSaleId) && !notifiedTransfers.current.has(transfer.clientSaleId)) {
+      if (notify && !sales.some(row => row.id === transfer.clientSaleId) && !notifiedTransfers.current.has(transfer.clientSaleId)) {
         notifiedTransfers.current.add(transfer.clientSaleId);
-        toast.success('Transfer received', recorded ? {
+        toast.success(`Transfer received: ${recorded?.customerName || 'Customer'} · #${transfer.clientSaleId}`, recorded ? {
           duration: 10000,
           action: { label: 'View receipt', onClick: () => setLastSale(recorded) },
         } : { description: 'Receipt details are unavailable. Contact your manager.' });
       }
     } finally { settlingTransfers.current.delete(transfer.clientSaleId); }
-  };
-
-  const startTransfer = async (provider: 'bachs' | 'squad') => {
-    if (!store || !cashier || !online) return;
-    const hubId = store.hubId || store.storeId;
-    if (!hubId) { toast.error('This till has no location yet'); return; }
-    const attemptKey = 'pos.transferAttempt.' + store.deviceId;
-    let saved: { sale: PosSale; provider: 'bachs' | 'squad' } | null = null;
-    try { saved = JSON.parse(sessionStorage.getItem(attemptKey) || 'null'); } catch { /* Ignore a malformed local draft. */ }
-    if (saved && (saved.provider !== provider || JSON.stringify(saved.sale.lines) !== JSON.stringify(toSaleLines(lines)))) {
-      throw new Error('A previous transfer request has an unknown result. Check Transfers before starting a different payment. Retry the same cart and provider to recover it.');
-    }
-    const sale: PosSale = saved?.sale || {
-      id: newSaleId(store.deviceId),
-      deviceId: store.deviceId,
-      storeId: hubId,
-      hubId,
-      cashierId: cashier.id,
-      cashierName: cashier.name,
-      lines: toSaleLines(lines),
-      subtotal, discount, total,
-      orderDiscount: orderDiscount || undefined,
-      tax: tax || undefined,
-      taxRatePct: store.taxRatePct || undefined,
-      payments: [{ method: 'Transfer', amount: total }],
-      change: 0,
-      customerId: customer?.id,
-      customerName: customer?.name,
-      status: 'completed',
-      createdAt: new Date().toISOString(),
-      syncState: 'pending',
-      shiftId: shift?.id,
-    };
-    sessionStorage.setItem(attemptKey, JSON.stringify({ sale, provider }));
-    try {
-      const transfer = await startPosTransfer({
-        provider,
-        clientSaleId: sale.id,
-        hubId,
-        deviceId: store.deviceId,
-        cashierName: cashier.name,
-        customerId: customer?.id,
-        customerName: customer?.name,
-        shiftId: shift?.id,
-        orderDiscount,
-        lines: sale.lines.map((line) => ({
-          productId: line.productId,
-          saleUnit: line.saleUnit,
-          qty: line.qty,
-          discount: line.discount,
-        })),
-        posSale: sale,
-      });
-      sessionStorage.removeItem(attemptKey);
-      if (transfer.status === 'cancelled') throw new Error(transfer.reconciliationReason || 'Transfer could not be started. No stock is held.');
-      clearCart();
-      await refreshAvailability();
-      rememberTransfer({ ...transfer, sale: { ...transfer.sale, posSale: sale } });
-      setActiveTransfer({ ...transfer, sale: { ...transfer.sale, posSale: sale } });
-      setShowPay(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not start the transfer');
-      throw err;
-    }
   };
 
   const pullTransfer = async (transfer: PosTransfer, quiet: boolean) => {
@@ -370,7 +331,7 @@ function SellScreen() {
 
   const continueFromTransfer = () => {
     setActiveTransfer(null);
-    setShowPay(false);
+
     toast.success('Next sale is ready. The transfer stays in Transfers.');
   };
 
@@ -396,7 +357,7 @@ function SellScreen() {
         void (async () => {
           for (const row of rows.filter(row => row.status === 'paid')) {
             if (cancelled) break;
-            await settleTransfer(row);
+            await settleTransfer(row, false);
           }
         })().catch(() => toast.error('Could not restore payment receipts. Reconnect to retry.'));
         const attemptKey = 'pos.transferAttempt.' + store.deviceId;
@@ -418,45 +379,11 @@ function SellScreen() {
     return () => clearInterval(handle);
   }, [online, transfers]);
 
-  const completeSale = async (payments: PosPayment[]) => {
-    if (!store || !cashier) return;
-    if (!online) throw new Error('Connect to the internet to validate available stock.');
-    const sale: PosSale = {
-      id: newSaleId(store.deviceId),
-      deviceId: store.deviceId,
-      storeId: store.hubId || store.storeId || '',
-      hubId: store.hubId || store.storeId,
-      cashierId: cashier.id,
-      cashierName: cashier.name,
-      lines: toSaleLines(lines),
-      subtotal, discount, total,
-      orderDiscount: orderDiscount || undefined,
-      tax: tax || undefined,
-      taxRatePct: store.taxRatePct || undefined,
-      payments,
-      change: changeDue(payments, total),
-      customerId: customer?.id,
-      customerName: customer?.name,
-      status: 'completed',
-      createdAt: new Date().toISOString(),
-      syncState: 'pending',
-      shiftId: shift?.id,
-    };
-    await submitPosSale(sale as unknown as Record<string, unknown>);
-    sale.syncState = 'synced';
-    await recordSale(sale);
-    setLastSale(sale);
-    setShowPay(false);
-    clearCart();
-    await refreshSyncState();
-    await refreshAvailability();
-    toast.success(`Sale ${fmt(total)} recorded${navigator.onLine ? '' : ' — will sync when back online'}`);
-    void flushOutbox().then(refreshSyncState);
-  };
-
   const checkoutUpdated = async (row: Checkout) => {
     if (row.status !== 'completed' || !row.receipt) return;
-    await recordSale(row.receipt); await refreshSyncState(); await refreshAvailability();
+    await cacheReceipt(row.receipt);
+    if (row.receipt.deviceId === store?.deviceId) await recordSale(row.receipt);
+    await refreshSyncState(); await refreshAvailability();
     if (!completedCheckouts.current.has(row.clientSaleId)) {
       completedCheckouts.current.add(row.clientSaleId);
       const receipt = row.receipt;
@@ -570,9 +497,9 @@ function SellScreen() {
             <LifeBuoy size={15} /><span className="hidden sm:inline">Help</span>
             {myOpen > 0 && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-amber-500 px-1 text-[9px] font-black text-black">{myOpen}</span>}
           </button>
-          <button onClick={() => router.push('/history')} title="Sales and refunds"
+          <button onClick={() => router.push('/history')} title="Transactions"
             className="top-action hidden h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)] sm:inline-flex">
-            <ReceiptIcon size={15} /> Sales
+            <ReceiptIcon size={15} /> Transactions
           </button>
           <div className="hidden lg:block"><ThemeToggle compact /></div>
           <button onClick={() => setShowMore((v) => !v)} aria-label="More actions" aria-expanded={showMore} className="top-action inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold">
@@ -584,7 +511,7 @@ function SellScreen() {
             <p className="px-3 py-2 text-xs text-[var(--color-ink-dim)]">{todayCount} sale{todayCount === 1 ? '' : 's'} today <span className="mx-1 text-[var(--color-line-strong)]">/</span> {roleLabel(cashier.role)}</p>
             <MenuAction icon={LifeBuoy} label="My help requests" onClick={() => { setShowMore(false); setShowMyRequests(true); }} badge={myOpen + myResolved} />
             <MenuAction icon={ShieldCheck} label="Manager dashboard" onClick={() => { setShowMore(false); openSupervisor(); }} badge={waitingAssists} />
-            <MenuAction icon={ReceiptIcon} label="Sales and refunds" onClick={() => { setShowMore(false); router.push('/history'); }} />
+            <MenuAction icon={ReceiptIcon} label="Transactions" onClick={() => { setShowMore(false); router.push('/history'); }} />
             <MenuAction icon={FileText} label="Send updates to CRM" onClick={() => { setShowMore(false); void copyPayloadForCrm(); }} />
             <MenuAction icon={Clock} label="View shift totals" onClick={() => { setShowMore(false); showReport('X'); }} />
             <MenuAction icon={Check} label="Close my shift" onClick={() => { setShowMore(false); showReport('Z'); }} tone="warn" />
@@ -652,8 +579,8 @@ function SellScreen() {
             {customer ? <><span className="inline-flex min-w-0 items-center gap-2"><User size={16} className="shrink-0 text-[var(--color-brand)]" /><span className="truncate">{customer.name}</span></span><span className="text-[var(--color-brand)]">Change</span></> : <><span className="inline-flex items-center gap-2"><UserPlus size={16} className="text-[var(--color-brand)]" /> Add customer details</span><ChevronRight size={16} className="text-[var(--color-brand)]" /></>}
           </button>
 
-          {v2Options?.enabled && <div className="mx-4 mt-2 grid grid-cols-2 gap-2 text-xs font-bold">
-            <button className="min-h-11 rounded-lg border border-[var(--color-line)]" onClick={() => setCheckoutActivity(true)}>Checkouts</button>
+          {v2Options && <div className="mx-4 mt-2 grid grid-cols-2 gap-2 text-xs font-bold">
+            <button className="min-h-11 rounded-lg border border-[var(--color-line)]" onClick={() => router.push('/history?status=awaiting')}>Checkouts</button>
             <button className="min-h-11 rounded-lg border border-[var(--color-line)]" onClick={() => { if (customer) setRepayingCredit(true); else { setCustomerIntent('repay'); setShowCustomers(true); } }}>Repay credit</button>
           </div>}
           <div className="flex-1 space-y-2.5 overflow-y-auto p-4">
@@ -718,8 +645,9 @@ function SellScreen() {
               </p>
             )}
             <div className="mt-2 flex items-end justify-between border-t border-[var(--color-line)] pt-3"><span className="pb-1 text-sm font-extrabold">Total</span><span className="text-3xl font-black tracking-[-0.04em] text-[var(--color-brand)]">{fmt(total)}</span></div>
+              {optionsError && <p role="alert" className="mb-2 text-sm">{optionsError} <button onClick={() => setOptionsRetry(value => value + 1)} className="min-h-11 underline">Retry checkout settings</button></p>}
             <div className="flex gap-2">
-              <button disabled={lines.length === 0} onClick={holdCart}
+            <button disabled={lines.length === 0} onClick={holdCart}
                 className="secondary-action inline-flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[10px] text-xs font-bold disabled:opacity-40">
                 <PauseCircle size={14} /> Hold cart
               </button>
@@ -728,9 +656,9 @@ function SellScreen() {
                 <PlayCircle size={14} /> Held carts {held.length > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-black text-black">{held.length}</span>}
               </button>
             </div>
-            <button disabled={lines.length === 0 || (online && (quoting || !quote))} onClick={startCheckout}
+            <button disabled={!online || lines.length === 0 || (online && (quoting || !quote))} onClick={startCheckout}
               className="primary-action h-14 w-full rounded-[11px] text-base font-black disabled:opacity-40">
-              {online && quoting ? 'Checking price…' : online && lines.length > 0 && !quote ? 'Price check failed' : `Continue ${total > 0 ? fmt(total) : ''}`}
+              {!online ? 'Connect to continue' : quoting ? 'Checking price…' : lines.length > 0 && !quote ? 'Price check failed' : `Continue ${total > 0 ? fmt(total) : ''}`}
             </button>
           </div>
         </aside>
@@ -755,16 +683,6 @@ function SellScreen() {
         <PinGate title="Approve discount"
           note={`This cart carries a ${Math.round(cartDiscountPct)}% discount, above the ${store.discountApprovalThresholdPct}% limit. A supervisor must authorise it.`}
           onCancel={() => setDiscountGate(false)} onVerify={authoriseDiscount} />
-      )}
-      {showPay && (
-        <PaymentModal
-          total={total}
-          online={online}
-          onClose={() => setShowPay(false)}
-          onConfirm={completeSale}
-          hasCustomer={!!customer}
-          onStartTransfer={startTransfer}
-        />
       )}
       {activeTransfer && (
         <TransferPanel
@@ -801,14 +719,10 @@ function SellScreen() {
       {showCheckout && v2Options && <CheckoutModal key={activeCheckout?.id || String(checkoutCart?.clientSaleId)} cart={checkoutCart} checkout={activeCheckout} options={v2Options}
         onCreated={(row) => { if (row.kind === 'sale') clearCart(); }} onUpdate={checkoutUpdated}
         onClose={() => { setShowCheckout(false); setActiveCheckout(null); }} />}
-      {checkoutActivity && <CheckoutActivity manager={cashier.role === 'manager'} onClose={() => setCheckoutActivity(false)} onOpen={(row) => {
-        setCheckoutActivity(false); if (row.status === 'completed' && row.receipt) setLastSale(row.receipt);
-        else { setActiveCheckout(row); setCheckoutCart(undefined); setShowCheckout(true); }
-      }} />}
       {repayingCredit && customer && <RepayCreditModal customerId={customer.id} customerName={customer.name} deviceId={store.deviceId} shiftId={shift?.id}
         onClose={() => setRepayingCredit(false)} onCreated={(row) => { setRepayingCredit(false); setActiveCheckout(row); setCheckoutCart(undefined); setShowCheckout(true); }} />}
       {picking && <UnitPicker product={picking} onClose={() => setPicking(null)} onAdd={(choice) => addSkuLine(picking, choice)} />}
-      {lastSale && <Receipt sale={lastSale} store={store} onClose={() => setLastSale(null)} />}
+
 
       {report && (
         <ReportModal report={report.data} store={store} kind={report.kind}

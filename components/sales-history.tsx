@@ -1,105 +1,13 @@
 'use client';
 
 import { useState } from 'react';
-import { X, Cloud, CloudOff, Loader2, RotateCcw, Ban, Search, Receipt as ReceiptIcon, Minus, Plus } from 'lucide-react';
+import { X, Minus, Plus } from 'lucide-react';
 import { PosSale, RETURN_REASONS } from '@/lib/types';
 import { fmt } from '@/lib/money';
 
-const stateChip = (s: PosSale) => {
-  if (s.syncState === 'synced') return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400"><Cloud size={10} /> Synced</span>;
-  if (s.syncState === 'syncing') return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-sky-400"><Loader2 size={10} className="animate-spin" /> Syncing</span>;
-  if (s.syncState === 'failed') return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-[var(--color-danger)]"><CloudOff size={10} /> Retrying</span>;
-  return <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-400"><CloudOff size={10} /> Queued</span>;
-};
-
-/** Quantities still returnable on a sale (??11). */
 export const returnableLines = (s: PosSale) =>
   s.lines.map((l) => ({ ...l, remaining: l.qty - ((s.returnedQty || {})[l.productId] || 0) }))
     .filter((l) => l.remaining > 0);
-
-export function SalesHistory({
-  sales, onClose, onRefund, onVoid, onView, canRefund = true, canVoid = true,
-}: {
-  sales: PosSale[];
-  onClose: () => void;
-  onRefund: (s: PosSale) => void;
-  onVoid: (s: PosSale) => void;
-  onView: (s: PosSale) => void;
-  /** Straight from the permission matrix (??22) ??? a cashier may not void. */
-  canRefund?: boolean;
-  canVoid?: boolean;
-}) {
-  const [q, setQ] = useState('');
-  // Hide reversal mirror-records from the list; the original carries the status.
-  const list = sales
-    .filter((s) => !s.reversalOf)
-    .filter((s) => !q || s.id.toLowerCase().includes(q.toLowerCase()) || (s.customerName || '').toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-
-  return (
-    <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
-      <div className="modal-shell flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-[16px]">
-        <div className="p-4 border-b border-[var(--color-line)] flex items-center justify-between shrink-0">
-          <h2 className="font-black flex items-center gap-2"><ReceiptIcon size={17} /> Sales</h2>
-          <button onClick={onClose} className="text-[var(--color-ink-dim)]"><X size={20} /></button>
-        </div>
-
-        <div className="p-3 shrink-0">
-          <div className="relative">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-ink-dim)]" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search receipt no. or customer..."
-              className="w-full h-11 pl-10 pr-3 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)] text-sm outline-none focus:border-[var(--color-brand)]" />
-          </div>
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
-          {list.length === 0 && <p className="text-center text-sm text-[var(--color-ink-dim)] py-10">No sales yet.</p>}
-          {list.map((s) => {
-            const remaining = returnableLines(s);
-            const reversed = s.status !== 'completed' || (s.kind !== 'repayment' && remaining.length === 0);
-            return (
-              <div key={s.id} className={`rounded-xl bg-[var(--color-surface-2)] p-3 ${reversed ? 'opacity-60' : ''}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <button onClick={() => onView(s)} className="text-left min-w-0 flex-1">
-                    <p className="text-sm font-black">
-                      {fmt(s.total)}
-                      {s.kind === 'repayment' && <span className="ml-2 text-[10px] uppercase">Credit repayment</span>}
-                      {reversed && <span className="ml-2 text-[10px] uppercase font-black text-[var(--color-danger)]">{s.status}</span>}
-                    </p>
-                    <p className="text-[11px] text-[var(--color-ink-dim)]">
-                      {new Date(s.createdAt).toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' })} ?? {s.lines.length} item{s.lines.length !== 1 ? 's' : ''} ?? {s.payments.map((p) => p.method).join('/')}
-                      {s.customerName ? ` ?? ${s.customerName}` : ''}
-                    </p>
-                    <p className="text-[9px] text-[var(--color-ink-dim)] font-mono mt-0.5 truncate">#{s.id}</p>
-                  </button>
-                  <div className="shrink-0 text-right space-y-1">
-                    {stateChip(s)}
-                    {!reversed && (
-                      <div className="flex gap-1 justify-end">
-                        {canRefund && s.kind !== 'repayment' && <button onClick={() => onRefund(s)} title="Refund"
-                          className="h-7 px-2 rounded-md border border-[var(--color-line)] text-[10px] font-bold inline-flex items-center gap-1 hover:border-amber-400 hover:text-amber-300">
-                          <RotateCcw size={10} /> Refund
-                        </button>}
-                        {canVoid && s.kind !== 'repayment' && <button onClick={() => onVoid(s)} title="Void"
-                          className="h-7 px-2 rounded-md border border-[var(--color-line)] text-[10px] font-bold inline-flex items-center gap-1 hover:border-[var(--color-danger)] hover:text-[var(--color-danger)]">
-                          <Ban size={10} /> Void
-                        </button>}
-                      </div>
-                    )}
-                    {reversed && s.refundReason && <p className="text-[10px] text-[var(--color-ink-dim)] max-w-[130px]">{s.refundReason}</p>}
-                    {!reversed && s.returnedQty && Object.keys(s.returnedQty).length > 0 && (
-                      <p className="text-[10px] font-bold text-amber-400">Partly returned</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 /* ????????????????????????????????? Return / void with quantities + reason (??11, ??12) ????????????????????????????????? */
 export function ReturnModal({

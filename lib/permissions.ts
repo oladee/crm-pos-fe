@@ -23,6 +23,7 @@ export const POS_ROLES: { key: PosRole; label: string; blurb: string }[] = [
 ];
 
 export type Permission =
+  | 'transaction.viewLocation'
   | 'sale.create' | 'payment.process'
   | 'sale.viewOwn' | 'sale.viewAll'
   | 'discount.apply' | 'discount.approve'
@@ -33,6 +34,7 @@ export type Permission =
   | 'audit.view' | 'settings.manage';
 
 export const PERMISSIONS: { key: Permission; label: string }[] = [
+  { key: 'transaction.viewLocation', label: 'View Location Transactions' },
   { key: 'sale.create', label: 'Create Sale' },
   { key: 'payment.process', label: 'Process Payment' },
   { key: 'sale.viewOwn', label: 'View Own Sales' },
@@ -57,30 +59,35 @@ const N: PermLevel = 'none', L: PermLevel = 'limited', F: PermLevel = 'full';
 /** Straight from the PRD's permission matrix. */
 export const MATRIX: Record<PosRole, Record<Permission, PermLevel>> = {
   cashier: {
+    'transaction.viewLocation': F,
     'sale.create': F, 'payment.process': F, 'sale.viewOwn': F, 'sale.viewAll': N,
     'discount.apply': L, 'discount.approve': N, 'refund.process': L, 'refund.approve': N,
     'transaction.void': N, 'cash.reconcile': L, 'shift.closeOwn': F,
     'inventory.adjust': N, 'product.manage': N, 'user.manage': N, 'audit.view': N, 'settings.manage': N,
   },
   manager: {
+    'transaction.viewLocation': F,
     'sale.create': F, 'payment.process': F, 'sale.viewOwn': F, 'sale.viewAll': F,
     'discount.apply': F, 'discount.approve': F, 'refund.process': F, 'refund.approve': F,
     'transaction.void': F, 'cash.reconcile': F, 'shift.closeOwn': F,
     'inventory.adjust': L, 'product.manage': L, 'user.manage': L, 'audit.view': L, 'settings.manage': N,
   },
   inventory: {
+    'transaction.viewLocation': F,
     'sale.create': N, 'payment.process': N, 'sale.viewOwn': F, 'sale.viewAll': F,
     'discount.apply': N, 'discount.approve': N, 'refund.process': N, 'refund.approve': N,
     'transaction.void': N, 'cash.reconcile': N, 'shift.closeOwn': N,
     'inventory.adjust': F, 'product.manage': F, 'user.manage': N, 'audit.view': L, 'settings.manage': N,
   },
   finance: {
+    'transaction.viewLocation': F,
     'sale.create': N, 'payment.process': N, 'sale.viewOwn': F, 'sale.viewAll': F,
     'discount.apply': F, 'discount.approve': F, 'refund.process': F, 'refund.approve': F,
     'transaction.void': F, 'cash.reconcile': F, 'shift.closeOwn': N,
     'inventory.adjust': N, 'product.manage': N, 'user.manage': N, 'audit.view': F, 'settings.manage': N,
   },
   admin: {
+    'transaction.viewLocation': F,
     'sale.create': F, 'payment.process': F, 'sale.viewOwn': F, 'sale.viewAll': F,
     'discount.apply': F, 'discount.approve': F, 'refund.process': F, 'refund.approve': F,
     'transaction.void': F, 'cash.reconcile': F, 'shift.closeOwn': F,

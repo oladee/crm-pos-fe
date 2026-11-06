@@ -73,8 +73,9 @@
 }
 
 html, body {
-  height: 100%;
-  overflow-x: hidden;
+  min-height: 100%;
+  height: auto;
+  overflow-x: clip;
   background: var(--color-bg);
   color: var(--color-ink);
   font-family: var(--font-inter-variable), Inter, ui-sans-serif, system-ui, sans-serif;
@@ -288,7 +289,7 @@ input::placeholder, textarea::placeholder { color: var(--color-placeholder); opa
 
 /* Manager workspace: operational, exception-first, and deliberately flatter. */
 .manager-shell {
-  overflow: hidden;
+  overflow: visible;
   background:
     radial-gradient(circle at 82% -18%, var(--color-soft-brand), transparent 34rem),
     var(--color-bg);
@@ -694,7 +695,7 @@ input::placeholder, textarea::placeholder { color: var(--color-placeholder); opa
 }
 
 @media (max-width: 480px) {
-  .manager-print-button { display: none; }
+  .manager-print-button { display: inline-flex; }
   .manager-secondary-metrics { grid-template-columns: minmax(0, 1fr); }
   .manager-secondary-metrics > div { border-top: 1px solid var(--color-line); border-right: 0 !important; }
   .manager-secondary-metrics > div:first-child { border-top: 0; }

@@ -55,7 +55,7 @@ export async function getJson<T>(path: string, auth = false): Promise<T> {
   const headers: Record<string, string> = {};
   const token = getPinToken();
   if (auth && token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`${API_URL}${path}`, { cache: 'no-store', headers });
+  const res = await fetch(`${API_URL}${path}`, { cache: 'no-store', headers, signal: AbortSignal.timeout(10000) });
   return readJson<T>(res);
 }
 

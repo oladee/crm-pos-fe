@@ -2,7 +2,7 @@ import type { PosSale } from './types';
 import { getJson, sendJson } from './remote';
 
 export type CheckoutMode = 'full_payment' | 'partial_credit' | 'full_credit';
-export type CheckoutOptions = { enabled: boolean; methods: Array<{ id: 'moniepoint' | 'squad' | 'manual'; name: string; available: boolean }> };
+export type CheckoutOptions = { methods: Array<{ id: 'moniepoint' | 'squad' | 'manual'; name: string; available: boolean; reason?: string | null }> };
 export type CheckoutAttempt = { id: string; clientAttemptId: string; reference: string; provider: 'moniepoint' | 'squad'; method: string;
   status: string; amountKobo: number; payableKobo: number | null; feeKobo: number | null; reviewReason: string | null;
   instructions: { bankName: string; accountName: string; accountNumber: string } | null };
@@ -11,7 +11,11 @@ export type Checkout = { id: string; clientSaleId: string; kind: 'sale' | 'repay
   dueDate?: string; receipt: PosSale | null; attempts: CheckoutAttempt[]; canConfirmReceived: boolean; reviewReason: string | null; createdAt: string };
 export type CustomerCredit = { id: string; saleReference: string; amountKobo: number; dueDate: string; status: string };
 
-export const checkoutOptions = () => getJson<CheckoutOptions>('/pos/checkouts/options', true);
+export async function checkoutOptions() {
+  const options = await getJson<CheckoutOptions>('/pos/checkouts/options', true);
+  if (!Array.isArray(options.methods)) throw new Error('Checkout settings are unavailable. Retry to reload them.');
+  return options;
+}
 export async function createCheckout(input: Record<string, unknown>) {
   const key = `pos.pendingCheckout.${input.deviceId}`;
   let saved: Record<string, unknown> | null = null;

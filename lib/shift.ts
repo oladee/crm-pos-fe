@@ -24,7 +24,7 @@ export interface ShiftReport {
   expectedCash: number;    // float + cash sales ??? cash refunds
   countedCash?: number;
   variance?: number;
-  topProducts: { name: string; qty: number; amount: number }[];
+  topProducts: { name: string; qty: number; amount: number; unit?: string }[];
 }
 
 const METHODS: PaymentMethod[] = ['Cash', 'Transfer', 'Card', 'Credit', 'Other'];
@@ -54,11 +54,13 @@ export function buildReport(shift: Shift, sales: PosSale[], countedCash?: number
   const expectedCash = shift.openingFloat + cashSales - cashRefunds - cashDrops;
 
   // top products by value
-  const tally = new Map<string, { name: string; qty: number; amount: number }>();
+  const tally = new Map<string, { name: string; qty: number; amount: number; unit?: string }>();
   positives.forEach((s) => s.lines.forEach((l) => {
-    const cur = tally.get(l.productId) || { name: l.name, qty: 0, amount: 0 };
+    const unit = l.saleUnit || l.unit;
+    const key = `${l.productId}:${unit}`;
+    const cur = tally.get(key) || { name: l.name, qty: 0, amount: 0, unit };
     cur.qty += l.qty; cur.amount += l.lineTotal;
-    tally.set(l.productId, cur);
+    tally.set(key, cur);
   }));
   const topProducts = Array.from(tally.values()).sort((a, b) => b.amount - a.amount).slice(0, 5);
 

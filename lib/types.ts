@@ -27,6 +27,8 @@ export interface StoreProfile {
   deviceLabel: string;
   /** Passkey credential id after this browser has been enrolled. */
   credentialId?: string;
+  /** Last server-verified enrollment mode, used only for cached offline access. */
+  verifiedDeviceAccess?: 'legacy' | 'passkey';
   /** Allow selling below zero stock while offline (business decision per store). */
   allowNegativeStock: boolean;
   setupComplete: boolean;
@@ -108,6 +110,7 @@ export interface PosPayment {
 }
 
 export interface PosSale {
+  origin?: { storeName?: string; deviceLabel?: string; receiptFooter?: string };
   kind?: 'sale' | 'repayment';
   paymentMode?: 'full_payment' | 'partial_credit' | 'full_credit';
   creditBalanceKobo?: number;

@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import { X, Delete, Printer, TrendingUp, AlertTriangle, Check, Clock } from 'lucide-react';
-import { Shift, StoreProfile } from '@/lib/types';
+import { StoreProfile } from '@/lib/types';
 import { ShiftReport } from '@/lib/shift';
 import { fmt, toKobo } from '@/lib/money';
+import { ThermalDocument, ThermalRow } from './thermal-document';
+import { receiptDate, receiptQuantity } from '@/lib/receipt';
 
 /* ????????????????????????????????? Numeric keypad shared by the money dialogs ????????????????????????????????? */
 export function MoneyPad({ value, onChange }: { value: string; onChange: (v: string) => void }) {
@@ -58,6 +60,12 @@ export function OpenShiftModal({ cashierName, onClose, onOpen }: { cashierName: 
 }
 
 /* ????????????????????????????????? X / Z report ????????????????????????????????? */
+const Row = ({ label, value, bold, tone }: { label: string; value: string; bold?: boolean; tone?: 'good' | 'bad' }) => (
+    <div className={`flex justify-between ${bold ? 'font-black text-sm' : 'text-xs'} ${tone === 'good' ? 'text-emerald-400' : tone === 'bad' ? 'text-[var(--color-danger)]' : ''}`}>
+      <span>{label}</span><span>{value}</span>
+    </div>
+  );
+
 export function ReportModal({
   report, store, kind, onClose, onConfirmClose,
 }: {
@@ -65,15 +73,21 @@ export function ReportModal({
   onClose: () => void; onConfirmClose?: (countedKobo: number) => void;
 }) {
   const [counted, setCounted] = useState('');
+  const [preview, setPreview] = useState(false);
   const countedKobo = toKobo(Number(counted) || 0);
   const variance = countedKobo - report.expectedCash;
   const showVariance = kind === 'Z' && counted !== '';
 
-  const Row = ({ label, value, bold, tone }: { label: string; value: string; bold?: boolean; tone?: 'good' | 'bad' }) => (
-    <div className={`flex justify-between ${bold ? 'font-black text-sm' : 'text-xs'} ${tone === 'good' ? 'text-emerald-400' : tone === 'bad' ? 'text-[var(--color-danger)]' : ''}`}>
-      <span>{label}</span><span>{value}</span>
-    </div>
-  );
+  if (preview) return <ThermalDocument title={kind === 'X' ? 'Mid-shift report' : 'End-of-shift report'} onBack={() => setPreview(false)}>
+    <header className="text-center"><h2>{store.storeName}</h2><p>{kind === 'X' ? 'X REPORT — MID-SHIFT' : 'Z REPORT — CLOSE SHIFT'}</p><p>{store.deviceLabel}</p><p>Cashier: {report.shift.cashierName}</p><p>Shift: {report.shift.id}</p><p>Opened: {receiptDate(report.shift.openedAt)} WAT</p><p>Printed: {receiptDate(new Date().toISOString())} WAT</p></header>
+    <section className="receipt-section"><ThermalRow label={'Sales (' + report.saleCount + ')'} value={fmt(report.grossSales)} /><ThermalRow label={'Refunds (' + report.refundCount + ')'} value={fmt(report.refunds)} /><ThermalRow label="Net sales" value={fmt(report.netSales)} strong /></section>
+    <section className="receipt-section"><h3>Collections and credit</h3>{report.byMethod.map(method => <ThermalRow key={method.method} label={method.method + ' (' + method.count + ')'} value={fmt(method.amount)} />)}</section>
+    <section className="receipt-section"><h3>Cash drawer</h3><ThermalRow label="Opening float" value={fmt(report.shift.openingFloat)} /><ThermalRow label="Cash collected" value={fmt(report.cashSales)} /><ThermalRow label="Cash refunds" value={fmt(report.cashRefunds)} /><ThermalRow label="Cash drops" value={fmt(report.cashDrops)} /><ThermalRow label="Expected cash" value={fmt(report.expectedCash)} strong />{showVariance && <><ThermalRow label="Counted cash" value={fmt(countedKobo)} /><ThermalRow label="Variance" value={fmt(variance)} strong /></>}</section>
+    {report.topProducts.length > 0 && <section className="receipt-section"><h3>Top sellers</h3>{report.topProducts.map((product,index) => <div className="receipt-item" key={index}><p>{product.name}</p><ThermalRow label={receiptQuantity(product.qty, product.unit) + ' ' + (product.unit || '')} value={fmt(product.amount)} /></div>)}</section>}
+    <p className="receipt-section text-center">{kind === 'X' ? 'Mid-shift snapshot. Shift remains open.' : 'Close-shift preview. Printing does not close the shift.'}</p>
+  </ThermalDocument>;
+
+
 
   return (
     <Shell title={kind === 'X' ? 'X Report - mid-shift' : 'Z Report - close shift'} onClose={onClose}>
@@ -106,7 +120,7 @@ export function ReportModal({
       {kind === 'Z' && (
         <div className="mt-4">
           <label className="text-[11px] font-bold text-[var(--color-ink-dim)]">Count the drawer</label>
-          <input value={counted} onChange={(e) => setCounted(e.target.value.replace(/[^\d.]/g, ''))} placeholder="0.00" inputMode="decimal"
+          <input aria-label="Counted cash" value={counted} onChange={(e) => setCounted(e.target.value.replace(/[^\d.]/g, ''))} placeholder="0.00" inputMode="decimal"
             className="w-full h-12 px-3 my-2 rounded-xl bg-[var(--color-surface-2)] border border-[var(--color-line)] text-xl font-black text-center outline-none focus:border-[var(--color-brand)]" />
           <MoneyPad value={counted} onChange={setCounted} />
           {showVariance && (
@@ -119,8 +133,8 @@ export function ReportModal({
       )}
 
       <div className="flex gap-2 mt-4">
-        <button onClick={() => window.print()} className="flex-1 h-12 rounded-xl border border-[var(--color-line)] font-bold text-xs inline-flex items-center justify-center gap-1.5">
-          <Printer size={14} /> Print
+        <button onClick={() => setPreview(true)} className="flex-1 h-12 rounded-xl border border-[var(--color-line)] font-bold text-xs inline-flex items-center justify-center gap-1.5">
+          <Printer size={14} /> Preview / print
         </button>
         {kind === 'X'
           ? <button onClick={onClose} className="flex-1 h-12 rounded-xl bg-[var(--color-brand)] text-white font-bold text-xs">Back to selling</button>
