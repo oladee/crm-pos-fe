@@ -195,6 +195,9 @@ function SellScreen() {
           saleUnit: l.saleUnit,
           qty: l.qty,
           discount: l.discount,
+          ...(l.saleUnit === 'Carton' && Number(l.saleWeightKg) > 0
+            ? { saleWeightKg: Number(l.saleWeightKg) }
+            : {}),
         })),
       }).then((next) => {
         if (!cancelled) setQuote(next);
@@ -215,18 +218,57 @@ function SellScreen() {
   const myOpen = assists.filter((a) => a.cashierId === cashier?.id && (a.status === 'open' || a.status === 'in_progress')).length;
   const myResolved = assists.filter((a) => a.cashierId === cashier?.id && a.status === 'resolved').length;
 
-  const addSkuLine = (p: PosProduct, choice: { saleUnit: string; unitPrice: number }) => {
+  const addSkuLine = (p: PosProduct, choice: { saleUnit: string; unitPrice: number; saleWeightKg?: number }) => {
     setLines((cur) => {
       const key = lineKey({ product: p, saleUnit: choice.saleUnit });
       const i = cur.findIndex((l) => lineKey(l) === key);
-      if (i >= 0) { const n = [...cur]; n[i] = { ...n[i], qty: n[i].qty + 1, unitPrice: choice.unitPrice }; return n; }
+      if (i >= 0) {
+        const n = [...cur];
+        const existing = n[i];
+        const nextQty = existing.qty + 1;
+        const registered = Number(p.cartonWeight) || 0;
+        n[i] = {
+          ...existing,
+          qty: nextQty,
+          unitPrice: choice.unitPrice,
+          saleWeightKg:
+            choice.saleUnit === 'Carton'
+              ? (Number(existing.saleWeightKg) || 0) +
+                (Number(choice.saleWeightKg) || registered || 0)
+              : undefined,
+        };
+        return n;
+      }
       return [...cur, { product: p, qty: 1, discount: 0, ...choice }];
     });
     setPicking(null);
     setMobileView('cart');
   };
   const setQty = (key: string, qty: number) =>
-    setLines((cur) => qty <= 0 ? cur.filter((l) => lineKey(l) !== key) : cur.map((l) => lineKey(l) === key ? { ...l, qty } : l));
+    setLines((cur) =>
+      qty <= 0
+        ? cur.filter((l) => lineKey(l) !== key)
+        : cur.map((l) => {
+            if (lineKey(l) !== key) return l;
+            if (l.saleUnit === 'Carton') {
+              const registered = Number(l.product.cartonWeight) || 0;
+              const perCarton =
+                l.qty > 0 && Number(l.saleWeightKg) > 0
+                  ? Number(l.saleWeightKg) / l.qty
+                  : registered;
+              return {
+                ...l,
+                qty,
+                saleWeightKg: perCarton > 0 ? Math.round(perCarton * qty * 100) / 100 : l.saleWeightKg,
+              };
+            }
+            return { ...l, qty };
+          }),
+    );
+  const setLineWeight = (key: string, saleWeightKg: number) =>
+    setLines((cur) =>
+      cur.map((l) => (lineKey(l) === key ? { ...l, saleWeightKg } : l)),
+    );
   const removeLine = (key: string) => setLines((cur) => cur.filter((l) => lineKey(l) !== key));
   const clearCart = () => { sessionStorage.removeItem(draftKey); setLines([]); setCustomer(null); setOrderDiscount(0); setDiscountApproved(false); };
 
@@ -251,12 +293,27 @@ function SellScreen() {
     if (v2Options) {
       setCheckoutCart({ clientSaleId: newSaleId(store!.deviceId), customerId: selectedCustomer!.id, customerName: selectedCustomer!.name,
         hubId: store!.hubId || store!.storeId, deviceId: store!.deviceId, shiftId: shift?.id, total,
-        orderDiscount, lines: toSaleLines(lines).map(line => ({ productId: line.productId, qty: line.qty, saleUnit: line.saleUnit, discount: line.discount })) });
+        orderDiscount, lines: toSaleLines(lines).map(line => ({
+          productId: line.productId,
+          qty: line.qty,
+          saleUnit: line.saleUnit,
+          discount: line.discount,
+          ...(line.saleUnit === 'Carton' && Number(line.saleWeightKg) > 0
+            ? { saleWeightKg: Number(line.saleWeightKg) }
+            : {}),
+        })) });
       setActiveCheckout(null); setShowCheckout(true);
     } else toast.error('Checkout settings are unavailable. Use Retry to reload them.');
   };
   const startCheckout = () => {
     if (!online) { toast.error('Connect to validate stock and continue to payment.'); return; }
+    const missingWeight = lines.some(
+      (l) => l.saleUnit === 'Carton' && !(Number(l.saleWeightKg) > 0),
+    );
+    if (missingWeight) {
+      toast.error('Enter weighed kg for every Carton line before checkout.');
+      return;
+    }
     if (!customer) { setCustomerIntent('checkout'); setShowCustomers(true); return; }
     beginPayment();
   };
@@ -268,7 +325,15 @@ function SellScreen() {
     if (v2Options) {
       setCheckoutCart({ clientSaleId: newSaleId(store!.deviceId), customerId: customer!.id, customerName: customer!.name,
         hubId: store!.hubId || store!.storeId, deviceId: store!.deviceId, shiftId: shift?.id, total, orderDiscount,
-        lines: toSaleLines(lines).map(line => ({ productId: line.productId, qty: line.qty, saleUnit: line.saleUnit, discount: line.discount })) });
+        lines: toSaleLines(lines).map(line => ({
+          productId: line.productId,
+          qty: line.qty,
+          saleUnit: line.saleUnit,
+          discount: line.discount,
+          ...(line.saleUnit === 'Carton' && Number(line.saleWeightKg) > 0
+            ? { saleWeightKg: Number(line.saleWeightKg) }
+            : {}),
+        })) });
       setActiveCheckout(null); setShowCheckout(true);
     } else toast.error('Checkout settings are unavailable. Use Retry to reload them.');
     toast.success(`Discount authorised by ${sup.name.split(' (')[0]}`);
@@ -605,10 +670,27 @@ function SellScreen() {
                 </div>
                 <div className="mt-3 flex items-center justify-between">
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setQty(key, l.qty - 1)} aria-label={`Reduce ${l.product.name} quantity`} className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"><Minus size={14} /></button>
-                    <input value={l.qty} aria-label={`${l.product.name} quantity`} onChange={(e) => setQty(key, Math.max(0, Number(e.target.value) || 0))}
-                      className="h-9 w-12 rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)] text-center text-sm font-bold outline-none" />
-                    <button onClick={() => setQty(key, l.qty + 1)} aria-label={`Increase ${l.product.name} quantity`} className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"><Plus size={14} /></button>
+                    <button
+                      onClick={() => setQty(key, Math.max(0, l.qty - (l.saleUnit === 'Carton' ? 0.5 : 1)))}
+                      aria-label={`Reduce ${l.product.name} quantity`}
+                      className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <input
+                      value={l.qty}
+                      aria-label={`${l.product.name} quantity`}
+                      step={l.saleUnit === 'Carton' ? 0.5 : 0.01}
+                      onChange={(e) => setQty(key, Math.max(0, Number(e.target.value) || 0))}
+                      className="h-9 w-12 rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)] text-center text-sm font-bold outline-none"
+                    />
+                    <button
+                      onClick={() => setQty(key, l.qty + (l.saleUnit === 'Carton' ? 0.5 : 1))}
+                      aria-label={`Increase ${l.product.name} quantity`}
+                      className="grid h-9 w-9 place-items-center rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)]"
+                    >
+                      <Plus size={14} />
+                    </button>
                   </div>
                   <div className="text-right">
                     <button onClick={() => setDiscountFor(key)}
@@ -618,6 +700,22 @@ function SellScreen() {
                     <p className="text-sm font-black">{fmt(lineTotal(l))}</p>
                   </div>
                 </div>
+                {l.saleUnit === 'Carton' && (
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <label className="text-[10px] font-bold uppercase text-[var(--color-ink-dim)]" htmlFor={`weight-${key}`}>
+                      Weighed kg
+                    </label>
+                    <input
+                      id={`weight-${key}`}
+                      type="number"
+                      min={0.01}
+                      step="0.01"
+                      value={l.saleWeightKg ?? ''}
+                      onChange={(e) => setLineWeight(key, Number(e.target.value) || 0)}
+                      className="h-8 w-24 rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)] px-2 text-right text-xs font-bold outline-none"
+                    />
+                  </div>
+                )}
               </div>
               );
             })}

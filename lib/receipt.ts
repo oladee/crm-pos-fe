@@ -17,6 +17,12 @@ export function printableLines(lines: PosSale['lines']): PosSale['lines'] {
             qty: previous.qty + line.qty,
             lineTotal: previous.lineTotal + line.lineTotal,
             discount: previous.discount + line.discount,
+            saleWeightKg: (() => {
+              const total =
+                (Number(previous.saleWeightKg) || 0) +
+                (Number(line.saleWeightKg) || 0);
+              return total > 0 ? total : undefined;
+            })(),
           }
         : { ...line },
     );

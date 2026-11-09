@@ -9,6 +9,8 @@ export interface CartLine {
   batchNumber?: string; // legacy carts only; new sales are allocated server-side
   saleUnit: string;
   unitPrice: number; // kobo for the SKU and sale unit
+  /** Actual weighed kg for Carton lines — drives stock debit. */
+  saleWeightKg?: number;
 }
 
 export const lineKey = (l: Pick<CartLine, 'product' | 'saleUnit'>) =>
@@ -100,6 +102,7 @@ export const toSaleLines = (lines: CartLine[]): PosSaleLine[] =>
     discount: l.discount,
     lineTotal: lineTotal(l),
     saleUnit: l.saleUnit,
+    saleWeightKg: l.saleUnit === 'Carton' ? l.saleWeightKg : undefined,
   }));
 
 /** Client-generated, collision-free across tills. */

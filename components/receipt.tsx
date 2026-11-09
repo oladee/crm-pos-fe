@@ -63,6 +63,9 @@ export function Receipt({
                     label={`${receiptQuantity(line.qty, line.saleUnit || line.unit)} ${line.saleUnit || line.unit || ''} × ${fmt(line.unitPrice)}`}
                     value={fmt(line.lineTotal)}
                   />
+                  {line.saleUnit === 'Carton' && line.saleWeightKg != null && line.saleWeightKg > 0 && (
+                    <p>Weighed: {receiptQuantity(line.saleWeightKg, 'Kg')} Kg</p>
+                  )}
                   {line.discount > 0 && <p>Item discount (included): {fmt(line.discount)}</p>}
                 </div>
               ))}

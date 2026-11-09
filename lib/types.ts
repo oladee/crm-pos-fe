@@ -101,6 +101,7 @@ export interface PosSaleLine {
   lineTotal: number;  // kobo
   batchNumber?: string;
   saleUnit?: string;
+  saleWeightKg?: number;
 }
 
 export interface PosPayment {
