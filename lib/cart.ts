@@ -16,6 +16,12 @@ export interface CartLine {
 export const lineKey = (l: Pick<CartLine, 'product' | 'saleUnit'>) =>
   `${l.product.id}:${l.saleUnit}`;
 
+/** Carton qty must be a positive multiple of 0.5 (matches POS BE). */
+export function snapCartonQty(qty: number): number {
+  if (!(qty > 0) || !Number.isFinite(qty)) return 0;
+  return Math.round(qty * 2) / 2;
+}
+
 export const lineTotal = (l: CartLine) => Math.max(0, (l.unitPrice || l.product.price) * l.qty - l.discount);
 
 export const cartSubtotal = (lines: CartLine[]) => lines.reduce((s, l) => s + (l.unitPrice || l.product.price) * l.qty, 0);

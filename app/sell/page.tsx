@@ -12,7 +12,7 @@ import {
 import { PosProduct, PosCustomer, PosSale, HeldSale, IssueType } from '@/lib/types';
 import { recordSale, saveHeld, deleteHeld, saveAssist, replaceCatalog } from '@/lib/db';
 import { flushOutbox } from '@/lib/sync';
-import { CartLine, computeTotals, cartCount, lineKey, lineTotal, toSaleLines, newSaleId, pctToAmount, maxDiscountPctInCart } from '@/lib/cart';
+import { CartLine, computeTotals, cartCount, lineKey, lineTotal, toSaleLines, newSaleId, pctToAmount, maxDiscountPctInCart, snapCartonQty } from '@/lib/cart';
 import { fetchCatalog, quoteSale, listPosTransfers, refreshPosTransfer, cancelPosTransfer, confirmPosTransferReceived, type PosTransfer } from '@/lib/remote';
 import { buildReport, ShiftReport } from '@/lib/shift';
 import { fmt } from '@/lib/money';
@@ -245,8 +245,11 @@ function SellScreen() {
     setMobileView('cart');
   };
   const setQty = (key: string, qty: number) =>
-    setLines((cur) =>
-      qty <= 0
+    setLines((cur) => {
+      const target = cur.find((l) => lineKey(l) === key);
+      const nextQty =
+        target?.saleUnit === 'Carton' ? snapCartonQty(qty) : qty;
+      return nextQty <= 0
         ? cur.filter((l) => lineKey(l) !== key)
         : cur.map((l) => {
             if (lineKey(l) !== key) return l;
@@ -258,13 +261,16 @@ function SellScreen() {
                   : registered;
               return {
                 ...l,
-                qty,
-                saleWeightKg: perCarton > 0 ? Math.round(perCarton * qty * 100) / 100 : l.saleWeightKg,
+                qty: nextQty,
+                saleWeightKg:
+                  perCarton > 0
+                    ? Math.round(perCarton * nextQty * 100) / 100
+                    : l.saleWeightKg,
               };
             }
-            return { ...l, qty };
-          }),
-    );
+            return { ...l, qty: nextQty };
+          });
+    });
   const setLineWeight = (key: string, saleWeightKg: number) =>
     setLines((cur) =>
       cur.map((l) => (lineKey(l) === key ? { ...l, saleWeightKg } : l)),
@@ -680,8 +686,14 @@ function SellScreen() {
                     <input
                       value={l.qty}
                       aria-label={`${l.product.name} quantity`}
+                      type="number"
+                      min={l.saleUnit === 'Carton' ? 0.5 : 0.01}
                       step={l.saleUnit === 'Carton' ? 0.5 : 0.01}
                       onChange={(e) => setQty(key, Math.max(0, Number(e.target.value) || 0))}
+                      onBlur={(e) => {
+                        if (l.saleUnit !== 'Carton') return;
+                        setQty(key, Math.max(0, Number(e.target.value) || 0));
+                      }}
                       className="h-9 w-12 rounded-[9px] border border-[var(--color-line)] bg-[var(--color-surface)] text-center text-sm font-bold outline-none"
                     />
                     <button
