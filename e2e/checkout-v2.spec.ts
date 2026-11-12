@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 test.use({ channel: 'chrome' });
 
-async function prepare(page: Page) {
+async function prepare(page: Page, moniepoint = false) {
   let row: Record<string, unknown> | null = null;
   const createdCustomers: Record<string, unknown>[] = [];
   const confirmations: Record<string, unknown>[] = [];
@@ -12,7 +12,7 @@ async function prepare(page: Page) {
     if (path.endsWith('/devices/status')) body = { registered: true, passkey: false };
     else if (path.endsWith('/catalog')) body = { data: [{ id: 'product-test', name: 'Rice SKU', sku: 'RICE', category: 'Grains', unit: 'Units', price: 10000, stock: 10, trackStock: true, isActive: true }] };
     else if (path.endsWith('/sales/quote')) body = { subtotal: 10000, total: 10000, discount: 0, tax: 0 };
-    else if (path.endsWith('/checkouts/options')) body = { enabled: true, methods: [{ id: 'manual', available: true }, { id: 'moniepoint', available: false }, { id: 'squad', available: false }] };
+    else if (path.endsWith('/checkouts/options')) body = { enabled: true, methods: [{ id: 'manual', available: true }, { id: 'moniepoint', available: moniepoint }, { id: 'squad', available: false }] };
     else if (path.endsWith('/customers') && request.method() === 'POST') {
       createdCustomers.push(request.postDataJSON()); body = { data: { id: 'customer-test', ...request.postDataJSON() } };
     } else if (path.endsWith('/customers')) body = { data: [{ id: 'existing-customer', name: 'Existing Customer' }] };
@@ -21,6 +21,9 @@ async function prepare(page: Page) {
       row = { id: 'checkout-test', ...input, kind: 'sale', customerName: 'Ada', status: 'awaiting', totalKobo: 10000,
         dueKobo: input.paymentMode === 'partial_credit' ? input.upfrontKobo : 10000, creditKobo: input.paymentMode === 'partial_credit' ? 10000 - input.upfrontKobo : 0,
         receipt: null, attempts: [], canConfirmReceived: true, createdAt: new Date().toISOString() };
+      body = row;
+    } else if (path.endsWith('/payment-attempts')) {
+      row = { ...row, attempts: [{ id: 'queued-test', reference: 'MP-queued-test', provider: 'moniepoint', method: 'card', status: 'queued', payableKobo: 10000 }] };
       body = row;
     } else if (path.endsWith('/confirm-received')) {
       confirmations.push(request.postDataJSON()); row = { ...row, status: 'completed', canConfirmReceived: false }; body = row;
@@ -43,7 +46,8 @@ async function prepare(page: Page) {
   await page.reload(); await page.waitForURL('**/sell');
   await page.getByRole('button', { name: /Rice SKU/ }).click();
   await page.getByRole('button', { name: /Continue/ }).click();
-  return { createdCustomers, confirmations, getRow: () => row };
+  return { createdCustomers, confirmations, getRow: () => row,
+    markSent: () => { row = { ...row, attempts: [{ ...(row?.attempts as object[])[0], status: 'pending' }] }; } };
 }
 
 test('requires a customer and preserves the cart when customer selection is cancelled', async ({ page }) => {
@@ -89,4 +93,17 @@ test('sends the partial-credit upfront amount and due date', async ({ page }) =>
   await page.getByRole('button', { name: 'Confirm payment received', exact: true }).click();
   await expect(page.getByLabel('Amount received', { exact: true })).toHaveValue('40');
   expect(state.getRow()).toMatchObject({ paymentMode: 'partial_credit', upfrontKobo: 4000, dueDate: '2099-01-01', creditKobo: 6000 });
+});
+
+test('shows the same reference while a payment request moves from queued to awaiting payment', async ({ page }) => {
+  const state = await prepare(page, true);
+  await page.getByRole('button', { name: 'Existing Customer', exact: true }).click();
+  const checkout = page.getByRole('dialog', { name: 'Customer checkout' });
+  await checkout.getByRole('button', { name: 'Moniepoint card' }).click();
+  await expect(checkout.getByText('Queued to send', { exact: true })).toBeVisible();
+  await expect(checkout.getByText('MP-queued-test', { exact: true })).toBeVisible();
+  state.markSent();
+  await expect(checkout.getByText('Awaiting payment', { exact: true })).toBeVisible({ timeout: 10_000 });
+  await expect(checkout.getByText('MP-queued-test', { exact: true })).toBeVisible();
+  await expect(checkout.getByText(/Recorded/)).toHaveCount(0);
 });

@@ -8,6 +8,14 @@ import { fmt, toKobo } from '@/lib/money';
 
 const inputStyle = 'field-control mt-1 min-h-11 w-full rounded-lg border border-[var(--color-line)] px-3';
 const actionStyle = 'primary-action min-h-12 w-full rounded-lg px-3 text-sm font-bold disabled:opacity-40';
+const attemptLabels: Record<string, string> = {
+  queued: 'Queued to send',
+  pending: 'Awaiting payment',
+  unknown: 'Checking with provider',
+  review: 'Needs review',
+  paid: 'Paid',
+  failed: 'Closed',
+};
 
 export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, onClose }: {
   cart?: Record<string, unknown>; checkout?: Checkout | null; options: CheckoutOptions;
@@ -95,8 +103,12 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
         <p className="text-xs text-[var(--color-ink-dim)]">Unavailable providers are not configured for this till. You can still confirm money you have received.</p>
         <button disabled={busy} className={actionStyle} onClick={() => void run(async () => { const next = await ensureCheckout(); setReceived(String(next.dueKobo / 100)); setManual(true); })}>Confirm payment received</button>
         {row?.attempts.map(attempt => <section key={attempt.id} className="rounded-lg border border-[var(--color-line)] p-3 text-sm">
-          <p className="font-bold">{attempt.provider === 'moniepoint' ? 'Moniepoint' : 'Squad'} · {attempt.method} · {attempt.status}</p>
+          <p className="font-bold">{attempt.provider === 'moniepoint' ? 'Moniepoint' : 'Squad'} · {attempt.method} · <span role="status">{attemptLabels[attempt.status] ?? attempt.status}</span></p>
           <p className="break-all text-xs">{attempt.reference}</p>
+          {attempt.status === 'queued' && <p className="mt-2">Keep this reference. The request will send when the payment worker is available.</p>}
+          {attempt.status === 'pending' && !attempt.instructions && <p className="mt-2">
+            {attempt.provider === 'moniepoint' ? 'Check the assigned Moniepoint terminal for the payment prompt.' : 'Waiting for the transfer account details.'}
+          </p>}
           {attempt.reviewReason && <p role="status" className="mt-2">{attempt.reviewReason}</p>}
           {attempt.instructions && <div className="mt-2 space-y-2">
             <p>Amount to transfer: {fmt(attempt.payableKobo || 0)}</p><p>Provider charges: {fmt(attempt.feeKobo || 0)}</p>
@@ -106,7 +118,7 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
         {manual && row && <form className="space-y-3 border-t border-[var(--color-line)] pt-4" onSubmit={e => { e.preventDefault(); void run(async () => { await accept(await confirmCheckout(row.id, { amountKobo: toKobo(Number(received)), actualMethod: method, account, reason, externalReference: reference, confirmed, attemptId: linkedAttempt || undefined })); setManual(false); }); }}>
           <h3 className="font-bold">Confirm actual receipt</h3>
           <label className="block text-sm">Where was this payment received?<select aria-label="Payment being confirmed" className={inputStyle} value={linkedAttempt} onChange={e => { const id = e.target.value; setLinkedAttempt(id); const attempt = row.attempts.find(a => a.id === id); setReceived(String((attempt?.payableKobo ?? row.dueKobo) / 100)); setAccount(attempt ? attempt.provider : ''); setMethod(attempt?.method === 'card' ? 'Card' : 'Transfer'); }}>
-            <option value="">Another account or payment method</option>{row.attempts.filter(a => a.payableKobo != null).map(a => <option key={a.id} value={a.id}>{a.provider}: {a.reference}</option>)}
+            <option value="">Another account or payment method</option>{row.attempts.filter(a => a.status !== 'queued' && a.payableKobo != null).map(a => <option key={a.id} value={a.id}>{a.provider}: {a.reference}</option>)}
           </select></label>
           <label className="block text-sm">Amount received (₦)<input aria-label="Amount received" className={inputStyle} type="number" step="0.01" required value={received} onChange={e => setReceived(e.target.value)} /></label>
           <label className="block text-sm">Actual method<select aria-label="Actual method" className={inputStyle} value={method} onChange={e => setMethod(e.target.value)}>{['Transfer', 'Card', 'Cash', 'Other'].map(m => <option key={m}>{m}</option>)}</select></label>
