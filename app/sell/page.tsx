@@ -7,7 +7,7 @@ import {
   Search, Plus, Minus, Trash2, Wifi, WifiOff, LogOut,
   ShoppingCart, UserPlus, Receipt as ReceiptIcon,
   Loader2, User, FileText, PauseCircle, PlayCircle, ShieldCheck, LifeBuoy,
-  Settings as Cog, Menu, ChevronRight, Clock, Check, Smartphone,
+  Settings as Cog, Menu, ChevronRight, Clock, Check, Smartphone, Bell, Volume2, VolumeX,
 } from 'lucide-react';
 import { PosProduct, PosCustomer, PosSale, HeldSale, IssueType } from '@/lib/types';
 import { recordSale, saveHeld, deleteHeld, saveAssist, replaceCatalog } from '@/lib/db';
@@ -32,6 +32,7 @@ import { UnitPicker } from '@/components/unit-picker';
 import { RequireShift } from '@/components/route-guards';
 import { SellSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
+import { useLiveTill } from '@/contexts/live-till-context';
 import { newAssistId, openCount } from '@/lib/assist';
 import { can, canFully, roleLabel } from '@/lib/permissions';
 import { SalesOsBrand } from '@/components/brand';
@@ -46,6 +47,7 @@ export default function SellPage() {
 }
 
 function SellScreen() {
+  const { enabled: liveEnabled, connected: liveConnected, setActivity, sound, toggleSound, notices } = useLiveTill();
   const router = useRouter();
   const {
     store, catalog, setCatalog, customers, cashiers, cashier, shift, sales, held, assists,
@@ -135,6 +137,10 @@ function SellScreen() {
   const [optionsError, setOptionsError] = useState('');
   const [optionsRetry, setOptionsRetry] = useState(0);
   useEffect(() => {
+    setActivity(showCheckout ? 'checking-out' : showCustomers ? 'selecting-customer' : lines.length ? 'building-cart' : 'idle');
+  }, [showCheckout, showCustomers, lines.length, setActivity]);
+  useEffect(() => () => setActivity('idle'), [setActivity]);
+  useEffect(() => {
     if (!lastSale) return;
     const receipt = lastSale;
     void cacheReceipt(receipt).then(() => { setLastSale(null); router.push('/history/' + encodeURIComponent(receipt.id)); }).catch(() => toast.error('Could not open receipt. Retry from Transactions.'));
@@ -147,14 +153,14 @@ function SellScreen() {
       try { const receipts = await recoverCheckoutReceipts(store?.deviceId || ''); if (!active) return;
         for (const receipt of receipts) if (!sales.some(sale => sale.id === receipt.id) && !completedCheckouts.current.has(receipt.id)) {
           completedCheckouts.current.add(receipt.id);
-          if (receiptBaseline.current) toast.success(receipt.kind === 'repayment' ? `Credit repayment received: ${receipt.customerName || 'Customer'} · #${receipt.id}` : `Payment received: ${receipt.customerName || 'Customer'} · #${receipt.id}`, { action: { label: 'View receipt', onClick: () => { setShowCheckout(false); setLastSale(receipt); } } });
+          if (receiptBaseline.current && !liveConnected) toast.success(receipt.kind === 'repayment' ? `Credit repayment received: ${receipt.customerName || 'Customer'} · #${receipt.id}` : `Payment received: ${receipt.customerName || 'Customer'} · #${receipt.id}`, { id: `payment:${receipt.id}`, action: { label: 'View receipt', onClick: () => { setShowCheckout(false); setLastSale(receipt); } } });
         }
         receiptBaseline.current = true; await refreshSyncState();
       } catch { /* Existing receipts remain available offline. */ } finally { running = false; }
     };
     void recover(); const timer = setInterval(() => void recover(), 15000);
     return () => { active = false; clearInterval(timer); };
-  }, [online, Boolean(v2Options), store?.deviceId]);
+  }, [online, Boolean(v2Options), store?.deviceId, liveConnected]);
   const settlingTransfers = useRef(new Set<string>());
   const notifiedTransfers = useRef(new Set<string>());
 
@@ -451,6 +457,9 @@ function SellScreen() {
   }, [online, transfers]);
 
   const checkoutUpdated = async (row: Checkout) => {
+    if (showCheckout && row.status === 'awaiting' && row.attempts.some(attempt => ['queued', 'pending', 'unknown', 'review'].includes(attempt.status))) {
+      setActivity('awaiting-payment');
+    }
     if (row.status !== 'completed' || !row.receipt) return;
     await cacheReceipt(row.receipt);
     if (row.receipt.deviceId === store?.deviceId) await recordSale(row.receipt);
@@ -458,7 +467,8 @@ function SellScreen() {
     if (!completedCheckouts.current.has(row.clientSaleId)) {
       completedCheckouts.current.add(row.clientSaleId);
       const receipt = row.receipt;
-      toast.success(row.kind === 'repayment' ? 'Credit repayment recorded' : 'Checkout recorded', { duration: 10000,
+      if (liveConnected && ['provider', 'manual'].includes(receipt.receiptPayment?.confirmationSource ?? '')) return;
+      toast.success(row.kind === 'repayment' ? 'Credit repayment recorded' : 'Checkout recorded', { duration: 10000, id: `payment:${receipt.id}`,
         action: { label: 'View receipt', onClick: () => { setShowCheckout(false); setLastSale(receipt); } } });
     }
   };
@@ -547,6 +557,23 @@ function SellScreen() {
           </div>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
+          {liveEnabled && <details className="relative">
+            <summary aria-label="Notifications" title="Notifications" className="top-action grid h-10 w-10 cursor-pointer list-none place-items-center rounded-[10px]"><Bell size={16} /></summary>
+            <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3 shadow-lg">
+              <button type="button" className="flex min-h-10 items-center gap-2 text-sm font-semibold" onClick={() => void toggleSound()}>
+                {sound ? <Volume2 size={16} /> : <VolumeX size={16} />}
+                {sound ? 'Mute notifications' : 'Enable notification sound'}
+              </button>
+              <ul className="max-h-64 space-y-2 overflow-auto text-sm">
+                {notices.map(notice => <li key={notice.id}>
+                  {notice.kind === 'payment-confirmed' && notice.reference
+                    ? <button className="min-h-9 text-left underline" onClick={() => router.push('/history/' + encodeURIComponent(notice.reference!))}>{notice.title} · View receipt</button>
+                    : notice.title}
+                </li>)}
+                {!notices.length && <li>No notifications yet</li>}
+              </ul>
+            </div>
+          </details>}
           <button onClick={manualSync}
             className={`top-action inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold ${
               online ? 'border-[var(--color-line)] text-[var(--color-ink)]' : 'border-amber-500/40 bg-amber-500/10 text-[var(--color-warn)]'}`}>

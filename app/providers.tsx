@@ -2,11 +2,12 @@
 
 import { ThemeProvider } from '@/components/theme-provider';
 import { TillProvider } from '@/contexts/till-context';
+import { LiveTillProvider } from '@/contexts/live-till-context';
 
 export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeProvider>
-      <TillProvider>{children}</TillProvider>
+      <TillProvider><LiveTillProvider>{children}</LiveTillProvider></TillProvider>
     </ThemeProvider>
   );
 }

@@ -92,6 +92,99 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     expect(count()).toBe(1);
   });
 }
+
+test('live checkout notice sounds once across tabs and leaves the active cart intact', async ({ page, context }) => {
+  test.skip(process.env.NEXT_PUBLIC_POS_LIVE_ENABLED !== 'true', 'Live till browser build must be enabled');
+  await context.addInitScript(() => {
+    class FakeAudio {
+      state = 'running';
+      currentTime = 0;
+      destination = {};
+      async resume() {}
+      createOscillator() {
+        return {
+          frequency: { setValueAtTime() {} },
+          connect: (node: object) => node,
+          start() { localStorage.setItem('test.notification-tones', String(Number(localStorage.getItem('test.notification-tones') || 0) + 1)); },
+          stop() {},
+        };
+      }
+      createGain() { return { gain: { setValueAtTime() {}, exponentialRampToValueAtTime() {} }, connect() {} }; }
+    }
+    Object.defineProperty(window, 'AudioContext', { value: FakeAudio });
+  });
+  const broadcast: Array<(item: object) => void> = [];
+  await context.routeWebSocket('**/pos/live', ws => {
+    ws.onMessage(raw => {
+      const message = JSON.parse(String(raw));
+      if (message.type !== 'authenticate') return;
+      ws.send(JSON.stringify({ type: 'authenticated', transportReady: true }));
+      ws.send(JSON.stringify({ type: 'notifications', items: [{
+        id: 'historical', kind: 'payment-confirmed', title: 'Historical payment', reference: 'historical',
+      }] }));
+      broadcast.push(item => ws.send(JSON.stringify({ type: 'notification', item })));
+    });
+  });
+  await prepare(page, {}, false, false);
+  const second = await context.newPage();
+  await prepare(second, {}, false, false);
+  await expect.poll(() => broadcast.length).toBeGreaterThanOrEqual(2);
+  for (const tab of [page, second]) {
+    await tab.getByLabel('Notifications', { exact: true }).click();
+    await tab.getByRole('button', { name: 'Enable notification sound' }).click();
+    await expect(tab.getByRole('button', { name: 'Mute notifications' })).toBeVisible();
+    await tab.getByLabel('Notifications', { exact: true }).click();
+  }
+  await page.getByRole('button', { name: /Rice SKU/ }).click();
+  const cart = page.getByRole('button', { name: /^Continue / });
+  await expect(cart).toBeEnabled();
+  const payment = { id: 'new-live-payment', title: 'Payment confirmed', kind: 'payment-confirmed', reference: 'older-order' };
+  for (const send of broadcast.slice(-2)) { send(payment); send(payment); }
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('test.notification-tones'))).toBe('1');
+  await expect(page).toHaveURL(/\/sell$/);
+  await expect(cart).toBeEnabled();
+  await page.getByLabel('Notifications', { exact: true }).click();
+  await page.getByRole('button', { name: 'Mute notifications' }).click();
+  await second.getByLabel('Notifications', { exact: true }).click();
+  await expect(second.getByRole('button', { name: 'Enable notification sound' })).toBeVisible();
+  for (const send of broadcast.slice(-2)) send({ ...payment, id: 'muted-live-payment' });
+  await expect(second.getByText('Payment confirmed · View receipt')).toHaveCount(2);
+  expect(await page.evaluate(() => localStorage.getItem('test.notification-tones'))).toBe('1');
+});
+
+test('live checkout notice survives a racing snapshot and unavailable notification storage', async ({ page }) => {
+  test.skip(process.env.NEXT_PUBLIC_POS_LIVE_ENABLED !== 'true', 'Live till browser build must be enabled');
+  await page.addInitScript(() => {
+    const open = indexedDB.open.bind(indexedDB);
+    indexedDB.open = (name, version) => {
+      if (name === 'fudfarmer-pos-live') throw new DOMException('Storage unavailable', 'SecurityError');
+      return open(name, version);
+    };
+  });
+  const item = { id: 'racing-notice', kind: 'payment-confirmed', title: 'Racing payment confirmed', reference: 'prior-checkout' };
+  let disconnectTransport: (() => void) | undefined;
+  await page.routeWebSocket('**/pos/live', ws => {
+    ws.onMessage(raw => {
+      if (JSON.parse(String(raw)).type !== 'authenticate') return;
+      disconnectTransport = () => ws.send(JSON.stringify({ type: 'transport', transportReady: false }));
+      ws.send(JSON.stringify({ type: 'authenticated', transportReady: true }));
+      ws.send(JSON.stringify({ type: 'notification', item }));
+      ws.send(JSON.stringify({ type: 'notifications', items: [] }));
+      ws.send(JSON.stringify({ type: 'notification', item }));
+    });
+  });
+  await prepare(page, {}, false, false);
+  await expect(page.getByText(item.title, { exact: true })).toHaveCount(1);
+  await page.getByLabel('Notifications', { exact: true }).click();
+  await expect(page.getByRole('button', { name: `${item.title} · View receipt` })).toHaveCount(1);
+  await page.getByLabel('Notifications', { exact: true }).click();
+  const recovered = { ...payment.sale.posSale, id: 'fallback-checkout', syncState: 'synced' };
+  await page.route('**/pos/checkouts', route => route.fulfill({
+    json: { data: [{ status: 'completed', receipt: recovered }], nextCursor: null },
+  }));
+  disconnectTransport?.();
+  await expect(page.getByText('Payment received: Customer · #fallback-checkout', { exact: true })).toBeVisible();
+});
 test('a failed confirmation keeps the dialog and payment pending', async ({ page }) => {
   const count = await prepare(page, {}, true);
   await page.getByRole('button', { name: 'I have received payment' }).click();
