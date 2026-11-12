@@ -654,10 +654,13 @@ function SellScreen() {
                 return (
                   <button key={p.id} onClick={() => low ? toast.error('No available stock') : p.unit.toLowerCase().startsWith('carton') ? setPicking(p) : addSkuLine(p, { saleUnit: p.unit, unitPrice: p.price })}
                     className="product-card tap relative p-3.5 text-left sm:p-4">
-                    <span className="product-add absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-[10px]"><Plus size={16} /></span>
-                    <p className="line-clamp-2 min-h-[2.6rem] pr-10 text-sm font-extrabold leading-[1.25] tracking-[-0.01em] sm:text-[15px]">{p.name}</p>
-                    <p className="mt-1.5 text-xs text-[var(--color-ink-dim)]">{low ? 'Out of stock' : `${p.stock} ${p.unit} available`}</p>
-                    <p className={`mt-2 text-lg font-black tracking-[-0.02em] ${low ? 'text-[var(--color-danger)]' : 'text-[var(--color-brand)]'}`}>{fmt(p.price)}</p>
+                    <ProductPhoto key={p.imageUrl} url={p.imageUrl} />
+                    <div className="relative">
+                      <span className="product-add absolute right-0 top-0 grid h-8 w-8 place-items-center rounded-[10px]"><Plus size={16} /></span>
+                      <p className="line-clamp-2 min-h-[2.6rem] pr-10 text-sm font-extrabold leading-[1.25] tracking-[-0.01em] sm:text-[15px]">{p.name}</p>
+                      <p className="mt-1.5 text-xs text-[var(--color-ink-dim)]">{low ? 'Out of stock' : `${p.stock} ${p.unit} available`}</p>
+                      <p className={`mt-2 text-lg font-black tracking-[-0.02em] ${low ? 'text-[var(--color-danger)]' : 'text-[var(--color-brand)]'}`}>{fmt(p.price)}</p>
+                    </div>
                   </button>
                 );
               })}
@@ -887,6 +890,20 @@ function SellScreen() {
       {showMyRequests && (
         <MyRequests mine={assists.filter((a) => a.cashierId === cashier.id).sort((x, y) => y.createdAt.localeCompare(x.createdAt))}
           onClose={() => setShowMyRequests(false)} />
+      )}
+    </div>
+  );
+}
+
+function ProductPhoto({ url }: { url?: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="mb-2 grid h-20 place-items-center overflow-hidden rounded-lg border border-[var(--color-line)]">
+      {url && !failed ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-20 w-full object-cover" onError={() => setFailed(true)} />
+      ) : (
+        <ShoppingCart aria-hidden size={20} className="text-[var(--color-ink-dim)] opacity-50" />
       )}
     </div>
   );

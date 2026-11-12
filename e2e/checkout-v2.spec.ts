@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 test.use({ channel: 'chrome' });
 
-async function prepare(page: Page, moniepoint = false) {
+async function prepare(page: Page, moniepoint = false, openCheckout = true) {
   let row: Record<string, unknown> | null = null;
   const createdCustomers: Record<string, unknown>[] = [];
   const confirmations: Record<string, unknown>[] = [];
@@ -10,7 +10,13 @@ async function prepare(page: Page, moniepoint = false) {
     const request = route.request(), path = new URL(request.url()).pathname;
     let body: unknown = { data: [] };
     if (path.endsWith('/devices/status')) body = { registered: true, passkey: false };
-    else if (path.endsWith('/catalog')) body = { data: [{ id: 'product-test', name: 'Rice SKU', sku: 'RICE', category: 'Grains', unit: 'Units', price: 10000, stock: 10, trackStock: true, isActive: true }] };
+    else if (path.endsWith('/catalog')) {
+      const rice = { id: 'product-test', name: 'Rice SKU', sku: 'RICE', category: 'Grains', unit: 'Units', price: 10000, stock: 10, trackStock: true, isActive: true };
+      body = { data: openCheckout ? [rice] : [
+        { ...rice, imageUrl: 'https://images.example.test/rice.png' },
+        { ...rice, id: 'product-broken', name: 'Long product name with no available photo', imageUrl: 'https://images.example.test/missing.png' },
+      ] };
+    }
     else if (path.endsWith('/sales/quote')) body = { subtotal: 10000, total: 10000, discount: 0, tax: 0 };
     else if (path.endsWith('/checkouts/options')) body = { enabled: true, methods: [{ id: 'manual', available: true }, { id: 'moniepoint', available: moniepoint }, { id: 'squad', available: false }] };
     else if (path.endsWith('/customers') && request.method() === 'POST') {
@@ -44,8 +50,10 @@ async function prepare(page: Page, moniepoint = false) {
     sessionStorage.setItem('pos.cashierId', 'cashier-test'); sessionStorage.setItem('pos.pinJwt', 'test-token');
   });
   await page.reload(); await page.waitForURL('**/sell');
-  await page.getByRole('button', { name: /Rice SKU/ }).click();
-  await page.getByRole('button', { name: /Continue/ }).click();
+  if (openCheckout) {
+    await page.getByRole('button', { name: /Rice SKU/ }).click();
+    await page.getByRole('button', { name: /Continue/ }).click();
+  }
   return { createdCustomers, confirmations, getRow: () => row,
     markSent: () => { row = { ...row, attempts: [{ ...(row?.attempts as object[])[0], status: 'pending' }] }; } };
 }
@@ -106,4 +114,25 @@ test('shows the same reference while a payment request moves from queued to awai
   await expect(checkout.getByText('Awaiting payment', { exact: true })).toBeVisible({ timeout: 10_000 });
   await expect(checkout.getByText('MP-queued-test', { exact: true })).toBeVisible();
   await expect(checkout.getByText(/Recorded/)).toHaveCount(0);
+});
+
+test('renders catalog photos and broken-image placeholders in the mobile grid', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await page.route('https://images.example.test/rice.png', route => route.fulfill({
+    contentType: 'image/png',
+    body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'),
+  }));
+  await page.route('https://images.example.test/missing.png', route => route.fulfill({ status: 404 }));
+  await prepare(page, false, false);
+  const rice = page.getByRole('button', { name: /Rice SKU/ });
+  const broken = page.getByRole('button', { name: /Long product name/ });
+  await expect.poll(() => rice.locator('img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0);
+  await expect(broken.locator('img')).toHaveCount(0);
+  await expect(rice.getByText('₦100.00')).toBeVisible();
+  const first = await rice.boundingBox();
+  const second = await broken.boundingBox();
+  expect(first?.y).toBe(second?.y);
+  expect(Math.abs((second?.x ?? 0) - (first?.x ?? 0))).toBeGreaterThan(100);
+  await rice.click();
+  await expect(page.getByRole('button', { name: 'Cart 1', exact: true })).toBeVisible();
 });

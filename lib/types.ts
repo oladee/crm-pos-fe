@@ -57,6 +57,7 @@ export interface PosBatch {
 }
 
 export interface PosProduct {
+  imageUrl?: string;
   id: string;
   sku: string;
   name: string;
