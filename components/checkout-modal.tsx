@@ -35,7 +35,7 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
   const [reference, setReference] = useState('');
   const [received, setReceived] = useState('');
   const [confirmed, setConfirmed] = useState(false);
-  const [switchTo, setSwitchTo] = useState<{ provider: 'moniepoint' | 'squad'; method: 'card' | 'transfer' }>();
+  const [switchTo, setSwitchTo] = useState<{ provider: 'moniepoint' | 'squad'; method: 'any' | 'transfer' }>();
   const [showAccount, setShowAccount] = useState('');
   const [request, setRequest] = useState<{ id: string; provider: string; method: string }>();
   const guard = useRef(false);
@@ -67,7 +67,7 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
     try { const next = await creation.current; setRow(next); onCreated(next); await callback.current(next); return next; }
     catch (error) { creation.current = null; throw error; }
   };
-  const start = (provider: 'moniepoint' | 'squad', paymentMethod: 'card' | 'transfer', acknowledged = false) => {
+  const start = (provider: 'moniepoint' | 'squad', paymentMethod: 'any' | 'transfer', acknowledged = false) => {
     const retry = request?.provider === provider && request.method === paymentMethod ? request : undefined;
     if ((active || request) && !acknowledged && !retry) { setSwitchTo({ provider, method: paymentMethod }); return; }
     setSwitchTo(undefined);
@@ -106,18 +106,15 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
           <button className="min-h-11 underline" onClick={() => setSwitchTo(undefined)}>Keep existing request</button>
         </div>}
         <fieldset disabled={busy || (!row && mode === 'partial_credit' && (!dueDate || !(Number(upfront) > 0)))} className="space-y-2 disabled:opacity-50">
-          <div className="grid grid-cols-2 gap-2">
-            <button disabled={!options.methods.find(m => m.id === 'moniepoint')?.available} className={actionStyle} onClick={() => void start('moniepoint', 'card')}>Moniepoint card</button>
-            <button disabled={!options.methods.find(m => m.id === 'moniepoint')?.available} className={actionStyle} onClick={() => void start('moniepoint', 'transfer')}>Moniepoint transfer</button>
-          </div>
+          <button disabled={!options.methods.find(m => m.id === 'moniepoint')?.available} className={actionStyle} onClick={() => void start('moniepoint', 'any')}>Pay with Moniepoint</button>
           {!options.methods.find(m => m.id === 'moniepoint')?.available && <p className="text-sm">{options.methods.find(m => m.id === 'moniepoint')?.reason || 'No Moniepoint terminal configured for this till.'}</p>}
-          <button disabled={!options.methods.find(m => m.id === 'squad')?.available} className={actionStyle} onClick={() => void start('squad', 'transfer')}>Squad transfer</button>
+          <button disabled={!options.methods.find(m => m.id === 'squad')?.available} className={actionStyle} onClick={() => void start('squad', 'transfer')}>Pay with Squad</button>
           {!options.methods.find(m => m.id === 'squad')?.available && <p className="text-sm">{options.methods.find(m => m.id === 'squad')?.reason || 'Squad is not configured.'}</p>}
         </fieldset>
         <p className="text-xs text-[var(--color-ink-dim)]">Unavailable providers are not configured for this till. You can still confirm money you have received.</p>
         <button disabled={busy} className={actionStyle} onClick={() => void run(async () => { const next = await ensureCheckout(); setReceived(String(next.dueKobo / 100)); setManual(true); })}>Confirm payment received</button>
         {row?.attempts.map(attempt => <section key={attempt.id} className="rounded-lg border border-[var(--color-line)] p-3 text-sm">
-          <p className="font-bold">{attempt.provider === 'moniepoint' ? 'Moniepoint' : 'Squad'} · {attempt.method} · <span role="status">{attemptLabels[attempt.status] ?? attempt.status}</span></p>
+          <p className="font-bold">{attempt.provider === 'moniepoint' ? 'Moniepoint' : 'Squad'} · {attempt.method === 'any' ? 'Choose on terminal · ' : `${attempt.method} · `} <span role="status">{attemptLabels[attempt.status] ?? attempt.status}</span></p>
           <Reference label="Merchant reference" value={attempt.reference} />
           {attempt.providerReference && <Reference label="Moniepoint transaction reference" value={attempt.providerReference} />}
           {attempt.providerPaidAt && <p>Provider payment time: {new Date(attempt.providerPaidAt).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}</p>}
