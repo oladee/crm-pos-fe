@@ -1,4 +1,6 @@
 'use client';
+
+import { ReceiptSkeleton } from '@/components/skeletons';
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -93,12 +95,7 @@ function Details() {
       active = false;
     };
   }, [row]);
-  if (loading)
-    return (
-      <main className="p-5" role="status">
-        Loading transaction…
-      </main>
-    );
+  if (loading) return <ReceiptSkeleton />;
   if (error || !row)
     return (
       <main className="space-y-4 p-5">

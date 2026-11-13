@@ -24,11 +24,12 @@ import { reverseSale } from '@/lib/db';
 import { flushOutbox } from '@/lib/sync';
 import { fmt } from '@/lib/money';
 import { receiptDate } from '@/lib/receipt';
+import { HistorySkeleton } from '@/components/skeletons';
 
 export default function HistoryPage() {
   return (
     <RequireCashier>
-      <Suspense fallback={<p className="p-5">Loading transactions…</p>}>
+      <Suspense fallback={<HistorySkeleton />}>
         <History />
       </Suspense>
     </RequireCashier>
@@ -48,6 +49,7 @@ function History() {
   const [q, setQ] = useState(''),
     [date, setDate] = useState(''),
     [status, setStatus] = useState(params.get('status') || '');
+  const [initialLoad, setInitialLoad] = useState(true);
   const [busy, setBusy] = useState(true),
     [error, setError] = useState(''),
     [cached, setCached] = useState(false),
@@ -161,7 +163,10 @@ function History() {
         if (sequence === requestSequence.current)
           setError(cause instanceof Error ? cause.message : 'Could not load transactions');
       } finally {
-        if (sequence === requestSequence.current) setBusy(false);
+        if (sequence === requestSequence.current) {
+          setBusy(false);
+          setInitialLoad(false);
+        }
       }
     },
     [location, online, q, date, status],
@@ -208,6 +213,8 @@ function History() {
       throw cause;
     }
   };
+  if (initialLoad && location) return <HistorySkeleton />;
+
   return (
     <main className="mx-auto min-h-dvh w-full max-w-5xl px-4 pb-10 sm:px-6">
       <header className="sticky top-0 z-10 border-b border-[var(--color-line)] bg-[var(--color-bg)] py-4">
@@ -313,7 +320,7 @@ function History() {
         </div>
       )}
       {busy && (
-        <p role="status" className="py-3">
+        <p role="status" className="sr-only">
           Loading transactions…
         </p>
       )}

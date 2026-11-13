@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test';
 import { enterPin, loginAndOpenShift, loginAs, openMore } from './helpers';
 
+test.use({ channel: 'chrome' });
+
 test.describe('POS route split', () => {
   test('unsigned / redirects to /login', async ({ page }) => {
     await page.goto('/');
@@ -8,11 +10,41 @@ test.describe('POS route split', () => {
     await expect(page.getByPlaceholder('Username')).toBeVisible();
   });
 
+  async function mockLegacyTill(page: import('@playwright/test').Page) {
+    await page.route('**/pos/**', async route => {
+      const path = new URL(route.request().url()).pathname;
+      const body = path.endsWith('/devices/status')
+        ? { registered: true, passkey: false }
+        : path.endsWith('/auth/pin')
+          ? { staff: { id: 'cashier-test', name: 'Aisha', role: 'cashier', isActive: true }, token: 'test-token' }
+          : { data: [] };
+      await route.fulfill({ json: body });
+    });
+  }
+
   test('cashier PIN login lands on /shift', async ({ page }) => {
+    await mockLegacyTill(page);
     await loginAs(page, 'aisha', '1234');
     await expect(page).toHaveURL(/\/shift/);
     await expect(page.getByRole('heading', { name: 'Ready to start selling?' })).toBeVisible();
   });
+
+  for (const submitWith of ['keypad', 'keyboard']) {
+    test(`PIN-first sign-in submits with the ${submitWith} Enter key`, async ({ page }) => {
+      await mockLegacyTill(page);
+      await page.setViewportSize({ width: 360, height: 844 });
+      await page.goto('/login');
+      await expect(page.getByPlaceholder('Username')).toBeVisible();
+      await enterPin(page, '1234');
+      const username = page.getByPlaceholder('Username');
+      await expect(username).toBeFocused();
+      await expect(page.getByText('Enter your username, then tap Enter.')).toBeVisible();
+      await username.fill('aisha');
+      if (submitWith === 'keypad') await page.getByRole('button', { name: 'Enter', exact: true }).click();
+      else await username.press('Enter');
+      await expect(page).toHaveURL(/\/shift/);
+    });
+  }
 
   test('/sell without an open shift bounces to /shift', async ({ page }) => {
     await loginAs(page, 'aisha', '1234');

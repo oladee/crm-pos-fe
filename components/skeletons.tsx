@@ -82,12 +82,40 @@ export function SellSkeleton() {
 
 export function HistorySkeleton() {
   return (
-    <Frame label="Loading sales">
-      <div className="mx-auto max-w-3xl space-y-3 p-4">
-        <Bone className="h-12 w-full" />
-        {Array.from({ length: 6 }).map((_, i) => <Bone key={i} className="h-16 w-full" />)}
+    <main className="mx-auto min-h-dvh w-full max-w-5xl px-4 pb-10 sm:px-6" role="status" aria-busy="true" aria-label="Loading transactions">
+      <header className="space-y-2 border-b border-[var(--color-line)] py-4">
+        <Bone className="h-11 w-28" />
+        <Bone className="h-8 w-44" />
+        <Bone className="h-5 w-64 max-w-full" />
+      </header>
+      <Bone className="my-3 h-11 w-40" />
+      <div className="my-5 grid gap-3 sm:grid-cols-[1fr_170px_190px]">
+        {Array.from({ length: 3 }, (_, i) => <div key={i} className="space-y-1"><Bone className="h-5 w-28" /><Bone className="h-11 w-full" /></div>)}
       </div>
-    </Frame>
+      <div className="space-y-3">
+        {Array.from({ length: 6 }, (_, i) => <Bone key={i} className="h-28 w-full" />)}
+      </div>
+    </main>
+  );
+}
+
+export function ReceiptSkeleton() {
+  return (
+    <main className="min-h-dvh bg-[var(--color-bg)] print:hidden" role="status" aria-busy="true" aria-label="Loading receipt">
+      <section className="mx-auto w-full max-w-3xl pb-8">
+        <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-line)] p-4">
+          <Bone className="h-11 w-36" />
+          <Bone className="h-11 w-24" />
+          <div className="w-full"><Bone className="h-7 w-40" /></div>
+        </header>
+        <div className="mx-auto my-6 w-[58mm] bg-white py-5">
+          <div className="mx-auto w-[48mm] space-y-3">
+            <Bone className="mx-auto h-9 w-28" />
+            {Array.from({ length: 7 }, (_, i) => <Bone key={i} className="h-4 w-full" />)}
+          </div>
+        </div>
+      </section>
+    </main>
   );
 }
 

@@ -202,3 +202,20 @@ test('failed checkout settings never fall back to Bachs and Retry restores stand
   await expect(page.getByRole('button', { name: 'Confirm payment received', exact: true })).toBeEnabled();
   await expect(page.getByText('Transfer received', { exact: true })).toHaveCount(0);
 });
+
+test('mobile transaction and print loading keep their skeletons until data arrives', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 844 });
+  await prepare(page);
+  await page.route('**/pos/**', async route => {
+    if (/\/transactions(?:\/|\?|$)/.test(route.request().url())) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    await route.fallback();
+  });
+  await page.goto('/history');
+  await expect(page.getByRole('status', { name: 'Loading transactions' })).toBeVisible();
+  await page.locator('article').filter({ hasText: '#receipt-0' }).getByRole('link', { name: 'Print receipt' }).click();
+  await expect(page.getByRole('status', { name: 'Loading receipt' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Transaction receipt' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { printCalls: number }).printCalls)).toBe(1);
+});

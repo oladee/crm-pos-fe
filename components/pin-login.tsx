@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Delete } from 'lucide-react';
 import { Cashier, StoreProfile } from '@/lib/types';
@@ -23,35 +23,27 @@ export function PinLogin({
   const [username, setUsername] = useState('');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
-  const [assertion, setAssertion] = useState<unknown | undefined>(passkey ? undefined : null);
-  const ready = !passkey || assertion !== undefined;
-
-  const unlock = async () => {
-    if (!store || busy) return;
-    setBusy(true);
-    try {
-      const challenge = await authenticationOptions(store.deviceId);
-      if (challenge.legacy || !challenge.options) {
-        setAssertion(null);
-        return;
-      }
-      const signed = await startAuthentication({ optionsJSON: challenge.options as never });
-      setAssertion(signed);
-    } catch (err) {
-      const name = err && typeof err === 'object' && 'name' in err ? String(err.name) : '';
-      if (name === 'NotAllowedError') toast.error('The passkey prompt was cancelled');
-      else toast.error(err instanceof Error ? err.message : 'This till could not be unlocked');
-    } finally {
-      setBusy(false);
-    }
-  };
+  const submitting = useRef(false);
+  const usernameInput = useRef<HTMLInputElement>(null);
 
   const submit = async (value: string) => {
     const ident = username.trim().toLowerCase();
-    if (!ident || busy || !ready || !store) return;
-    if (!/^\d{4}$/.test(value)) return;
+    if (!store || submitting.current || !/^\d{4}$/.test(value)) return;
+    if (!ident) {
+      usernameInput.current?.focus();
+      return;
+    }
+    submitting.current = true;
     setBusy(true);
     try {
+      let assertion;
+      if (passkey) {
+        const challenge = await authenticationOptions(store.deviceId);
+        if (!challenge.legacy) {
+          if (!challenge.options) throw new Error('This till could not be unlocked');
+          assertion = await startAuthentication({ optionsJSON: challenge.options as never });
+        }
+      }
       const isEmail = ident.includes('@');
       const verified = await verifyPin({
         username: isEmail ? undefined : ident,
@@ -65,19 +57,21 @@ export function PinLogin({
       await onLogin(verified.staff);
       toast.success(`Welcome, ${verified.staff.name.split(' ')[0]}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Wrong username or PIN');
+      toast.error(err instanceof Error && err.name === 'NotAllowedError'
+        ? 'The passkey prompt was cancelled'
+        : err instanceof Error ? err.message : 'Wrong username or PIN');
       setPin('');
-      if (passkey) setAssertion(undefined);
+      submitting.current = false;
       setBusy(false);
     }
   };
 
   const tap = (d: string) => {
-    if (busy) return;
+    if (submitting.current) return;
     if (d === 'del') return setPin((p) => p.slice(0, -1));
     const next = (pin + d).slice(0, 4);
     setPin(next);
-    if (next.length === 4) setTimeout(() => submit(next), 120);
+    if (next.length === 4) void submit(next);
   };
 
   return (
@@ -94,20 +88,16 @@ export function PinLogin({
           </div>
         </div>
 
-        <div className="modal-shell w-full rounded-[16px] p-4 sm:p-5">
+        <form className="modal-shell w-full rounded-[16px] p-4 sm:p-5" onSubmit={(event) => { event.preventDefault(); void submit(pin); }}>
           <div className="mb-4">
-            <h2 className="text-lg font-black tracking-[-0.02em]">{ready ? 'Sign in' : 'Unlock this till'}</h2>
-            <p className="mt-1 text-sm text-[var(--color-ink-dim)]">{ready ? 'Enter your username, then your PIN.' : 'Confirm this device with its passkey, then sign in with your PIN.'}</p>
+            <h2 className="text-lg font-black tracking-[-0.02em]">Sign in</h2>
+            <p className="mt-1 text-sm text-[var(--color-ink-dim)]">{pin.length === 4 && !username.trim() ? 'Enter your username, then tap Enter.' : 'Enter your username and PIN.'}</p>
           </div>
-          {!ready && (
-            <button type="button" disabled={busy} onClick={() => void unlock()} className="primary-action h-14 w-full rounded-[11px] text-base font-black disabled:opacity-40">
-              {busy ? 'Waiting for the passkey…' : 'Use this device’s passkey'}
-            </button>
-          )}
-          {ready && <>
           <label className="mb-4 block">
             <span className="sr-only">Username</span>
             <input
+              ref={usernameInput}
+              enterKeyHint="go"
               autoFocus
               autoCapitalize="none"
               autoCorrect="off"
@@ -125,18 +115,17 @@ export function PinLogin({
             ))}
           </div>
           <div className="grid grid-cols-3 gap-2">
-            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'].map((k, i) => k === '' ? <span key={i} /> : (
+            {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'del'].map((k, i) => k === '' ? <button key={i} type="submit" disabled={busy} className="secondary-action h-16 rounded-[11px] font-black disabled:opacity-50">Enter</button> : (
               <button key={i} type="button" onClick={() => tap(k)} disabled={busy} aria-label={k === 'del' ? 'Delete' : k}
                 className="secondary-action grid h-16 place-items-center rounded-[11px] text-xl font-black disabled:opacity-50">
                 {k === 'del' ? <Delete size={20} /> : k}
               </button>
             ))}
           </div>
-          </>}
-        </div>
+        </form>
       </div>
 
-      {busy && ready && (
+      {busy && (
         <div className="signing-overlay fixed inset-0 z-50 grid place-items-center bg-[var(--color-backdrop)]" role="status" aria-live="polite" aria-busy="true">
           <div className="text-center">
             <div className="logo-pulse mx-auto w-[220px]">
