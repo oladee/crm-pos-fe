@@ -7,13 +7,13 @@ import {
   Search, Plus, Minus, Trash2, Wifi, WifiOff, LogOut,
   ShoppingCart, UserPlus, Receipt as ReceiptIcon,
   Loader2, User, FileText, PauseCircle, PlayCircle, ShieldCheck, LifeBuoy,
-  Settings as Cog, Menu, ChevronRight, Clock, Check, Smartphone, Bell, Volume2, VolumeX,
+  Settings as Cog, Menu, ChevronRight, Clock, Check, Bell, Volume2, VolumeX,
 } from 'lucide-react';
 import { PosProduct, PosCustomer, PosSale, HeldSale, IssueType } from '@/lib/types';
 import { recordSale, saveHeld, deleteHeld, saveAssist, replaceCatalog } from '@/lib/db';
 import { flushOutbox } from '@/lib/sync';
 import { CartLine, computeTotals, cartCount, lineKey, lineTotal, toSaleLines, newSaleId, pctToAmount, maxDiscountPctInCart, snapCartonQty } from '@/lib/cart';
-import { fetchCatalog, quoteSale, listPosTransfers, refreshPosTransfer, cancelPosTransfer, confirmPosTransferReceived, type PosTransfer } from '@/lib/remote';
+import { fetchCatalog, quoteSale, listPosTransfers, refreshPosTransfer, type PosTransfer } from '@/lib/remote';
 import { buildReport, ShiftReport } from '@/lib/shift';
 import { fmt } from '@/lib/money';
 import { cacheReceipt } from '@/lib/transactions';
@@ -24,7 +24,6 @@ import { recoverCheckoutReceipts } from '@/lib/checkout-history';
 import { confirmedTransferSale } from '@/lib/receipt';
 import { ReportModal, PinGate } from '@/components/shift-panels';
 import { RequestHelpModal, MyRequests } from '@/components/assist-panels';
-import { TransferPanel, TransferQueue } from '@/components/transfer-panel';
 import { DiscountModal } from '@/components/discount-modal';
 import { HeldModal } from '@/components/held-modal';
 import { CustomerModal } from '@/components/customer-modal';
@@ -122,9 +121,6 @@ function SellScreen() {
   const [quote, setQuote] = useState<{ subtotal: number; discount: number; tax: number; total: number } | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [transfers, setTransfers] = useState<PosTransfer[]>([]);
-  const [activeTransfer, setActiveTransfer] = useState<PosTransfer | null>(null);
-  const [showTransfers, setShowTransfers] = useState(false);
-  const [checkingTransfer, setCheckingTransfer] = useState(false);
   const [v2Options, setV2Options] = useState<CheckoutOptions | null>(null);
   const [showCheckout, setShowCheckout] = useState(false);
   const [activeCheckout, setActiveCheckout] = useState<Checkout | null>(null);
@@ -361,7 +357,6 @@ function SellScreen() {
   const settleTransfer = async (transfer: PosTransfer, notify = true) => {
     if (transfer.status !== 'paid') {
       rememberTransfer(transfer);
-      setActiveTransfer((current) => current?.clientSaleId === transfer.clientSaleId ? transfer : current);
       return;
     }
     if (settlingTransfers.current.has(transfer.clientSaleId)) return;
@@ -375,7 +370,6 @@ function SellScreen() {
         void flushOutbox().then(refreshSyncState);
       }
       setTransfers((current) => current.filter((row) => row.clientSaleId !== transfer.clientSaleId));
-      setActiveTransfer(current => current?.clientSaleId === transfer.clientSaleId ? null : current);
       await refreshAvailability();
       if (notify && !sales.some(row => row.id === transfer.clientSaleId) && !notifiedTransfers.current.has(transfer.clientSaleId)) {
         notifiedTransfers.current.add(transfer.clientSaleId);
@@ -394,33 +388,6 @@ function SellScreen() {
       await settleTransfer(merged);
     } catch (err) {
       if (!quiet) toast.error(err instanceof Error ? err.message : 'Could not check this transfer');
-    }
-  };
-
-  const checkTransfer = async (transfer: PosTransfer) => {
-    setCheckingTransfer(true);
-    try {
-      await pullTransfer(transfer, false);
-    } finally {
-      setCheckingTransfer(false);
-    }
-  };
-
-  const continueFromTransfer = () => {
-    setActiveTransfer(null);
-
-    toast.success('Next sale is ready. The transfer stays in Transfers.');
-  };
-
-  const cancelTransfer = async (transfer: PosTransfer) => {
-    try {
-      await cancelPosTransfer(transfer.clientSaleId);
-      setTransfers((current) => current.filter((row) => row.clientSaleId !== transfer.clientSaleId));
-      setActiveTransfer(null);
-      await refreshAvailability();
-      toast.success('Transfer cancelled');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not cancel this transfer');
     }
   };
 
@@ -581,23 +548,14 @@ function SellScreen() {
             <span>{online ? (pending > 0 ? 'Sync' : 'Online') : 'Offline'}</span>
             {pending > 0 && <span className="ml-0.5 rounded-full bg-amber-500 px-1.5 text-[10px] font-black text-black">{pending}</span>}
           </button>
-          <button onClick={() => setShowTransfers(true)} title="Bank transfers waiting for payment"
-            className="top-action relative inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
-            <Smartphone size={15} /><span className="hidden sm:inline">Transfers</span>
-            {transfers.some((transfer) => ['initializing', 'awaiting', 'expired', 'review'].includes(transfer.status)) && (
-              <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-amber-500 px-1 text-[9px] font-black text-black">
-                {transfers.filter((transfer) => ['initializing', 'awaiting', 'expired', 'review'].includes(transfer.status)).length}
-              </span>
-            )}
-          </button>
           <button onClick={() => setShowHelp(true)} title="Ask a supervisor for help"
             className="top-action relative inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
             <LifeBuoy size={15} /><span className="hidden sm:inline">Help</span>
             {myOpen > 0 && <span className="absolute -right-1 -top-1 grid h-4 min-w-4 place-items-center rounded-full bg-amber-500 px-1 text-[9px] font-black text-black">{myOpen}</span>}
           </button>
-          <button onClick={() => router.push('/history')} title="Transactions"
-            className="top-action hidden h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)] sm:inline-flex">
-            <ReceiptIcon size={15} /> Transactions
+          <button onClick={() => router.push('/history')} title="Transactions" aria-label="Transactions"
+            className="top-action inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
+            <ReceiptIcon size={15} /><span className="hidden sm:inline">Transactions</span>
           </button>
           <div className="hidden lg:block"><ThemeToggle compact /></div>
           <button onClick={() => setShowMore((v) => !v)} aria-label="More actions" aria-expanded={showMore} className="top-action inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold">
@@ -681,7 +639,7 @@ function SellScreen() {
           </button>
 
           {v2Options && <div className="mx-4 mt-2 grid grid-cols-2 gap-2 text-xs font-bold">
-            <button className="min-h-11 rounded-lg border border-[var(--color-line)]" onClick={() => router.push('/history?status=awaiting')}>Checkouts</button>
+            <button className="min-h-11 rounded-lg border border-[var(--color-line)]" onClick={() => router.push('/history?status=pending')}>Checkouts</button>
             <button className="min-h-11 rounded-lg border border-[var(--color-line)]" onClick={() => { if (customer) setRepayingCredit(true); else { setCustomerIntent('repay'); setShowCustomers(true); } }}>Repay credit</button>
           </div>}
           <div className="flex-1 space-y-2.5 overflow-y-auto p-4">
@@ -823,29 +781,6 @@ function SellScreen() {
         <PinGate title="Approve discount"
           note={`This cart carries a ${Math.round(cartDiscountPct)}% discount, above the ${store.discountApprovalThresholdPct}% limit. A supervisor must authorise it.`}
           onCancel={() => setDiscountGate(false)} onVerify={authoriseDiscount} />
-      )}
-      {activeTransfer && (
-        <TransferPanel
-          transfer={activeTransfer}
-          busy={checkingTransfer}
-          onConfirmReceived={async () => {
-            setCheckingTransfer(true);
-            try { await settleTransfer(await confirmPosTransferReceived(activeTransfer.clientSaleId)); }
-            catch (error) { toast.error(error instanceof Error ? error.message : 'Could not confirm payment'); throw error; }
-            finally { setCheckingTransfer(false); }
-          }}
-          onCheck={() => void checkTransfer(activeTransfer)}
-          onContinue={continueFromTransfer}
-          onCancel={() => void cancelTransfer(activeTransfer)}
-          onClose={() => setActiveTransfer(null)}
-        />
-      )}
-      {showTransfers && (
-        <TransferQueue
-          transfers={transfers}
-          onClose={() => setShowTransfers(false)}
-          onOpen={(transfer) => { setShowTransfers(false); setActiveTransfer(transfer); }}
-        />
       )}
       {showCustomers && (
         <CustomerModal

@@ -136,3 +136,17 @@ test('renders catalog photos and broken-image placeholders in the mobile grid', 
   await rice.click();
   await expect(page.getByRole('button', { name: 'Cart 1', exact: true })).toBeVisible();
 });
+
+test('opens Transactions from the mobile toolbar and restores the cart', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 700 });
+  await prepare(page, false, false);
+  await page.getByRole('button', { name: /Rice SKU/ }).click();
+  await page.getByRole('button', { name: 'Transactions', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Transactions' })).toBeVisible();
+  await page.getByRole('button', { name: 'Pending', exact: true }).click();
+  await expect(page.getByLabel('Transaction status')).toHaveValue('pending');
+  await page.getByRole('button', { name: 'Resolved', exact: true }).click();
+  await expect(page.getByLabel('Transaction status')).toHaveValue('resolved');
+  await page.getByRole('link', { name: /Back to POS/ }).click();
+  await expect(page.getByRole('button', { name: 'Cart 1', exact: true })).toBeVisible();
+});

@@ -10,7 +10,6 @@ export function TransferPanel({
   busy,
   onConfirmReceived,
   onCheck,
-  onContinue,
   onCancel,
   onClose,
 }: {
@@ -18,7 +17,6 @@ export function TransferPanel({
   busy: boolean;
   onConfirmReceived: () => Promise<void>;
   onCheck: () => void;
-  onContinue: () => void;
   onCancel: () => void;
   onClose: () => void;
 }) {
@@ -64,9 +62,6 @@ export function TransferPanel({
               {busy ? 'Checking…' : 'Check status'}
             </button>
           )}
-          <button type="button" disabled={busy} onClick={onContinue} className="primary-action h-12 rounded-[11px] text-sm font-black">
-            Serve next customer
-          </button>
           {!paid && transfer.canCancel && (
             <button type="button" disabled={busy} onClick={onCancel} className="h-10 text-xs font-bold text-[var(--color-danger)]">
               Cancel this transfer
@@ -82,38 +77,6 @@ export function TransferPanel({
             <button type="button" disabled={busy} onClick={() => { void onConfirmReceived().then(() => setConfirming(false)).catch(() => undefined); }} className="primary-action h-12 rounded-[11px] text-sm font-black disabled:opacity-40">{busy ? 'Confirming payment…' : 'Confirm payment received'}</button>
           </div>
         </dialog>
-      </div>
-    </div>
-  );
-}
-
-export function TransferQueue({
-  transfers,
-  onOpen,
-  onClose,
-}: {
-  transfers: PosTransfer[];
-  onOpen: (transfer: PosTransfer) => void;
-  onClose: () => void;
-}) {
-  const waiting = transfers.filter((transfer) => ['initializing', 'awaiting', 'expired', 'review'].includes(transfer.status) || !!transfer.reconciliationReason);
-  return (
-    <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
-      <div className="modal-shell w-full max-w-md rounded-[16px] p-5">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-black">Transfers</h2>
-          <button type="button" onClick={onClose} className="text-sm font-bold text-[var(--color-ink-dim)]">Close</button>
-        </div>
-        <div className="mt-4 space-y-2">
-          {waiting.length === 0 && <p className="text-sm text-[var(--color-ink-dim)]">No transfers are waiting.</p>}
-          {waiting.map((transfer) => (
-            <button key={transfer.clientSaleId} type="button" onClick={() => onOpen(transfer)} className="w-full rounded-[12px] border border-[var(--color-line)] px-3 py-3 text-left">
-              <span className="block text-sm font-black">{fmt(transfer.payableKobo)}</span>
-              <span className="block text-xs font-bold">{transfer.status === 'cancelled' ? 'Cancelled — payment needs reconciliation' : transfer.reservationState !== 'held' ? 'Stock needs reconciliation' : transfer.status === 'expired' ? 'Expired — stock held' : transfer.status === 'review' ? 'Needs checking — stock held' : 'Stock reserved'}</span>
-              <span className="mt-0.5 block text-xs text-[var(--color-ink-dim)]">{transfer.provider === 'squad' ? 'Squad' : 'Bachs'} · {transfer.clientSaleId}</span>
-            </button>
-          ))}
-        </div>
       </div>
     </div>
   );

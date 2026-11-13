@@ -7,6 +7,8 @@ import { ArrowLeft, Printer, ReceiptText } from 'lucide-react';
 import { RequireCashier } from '@/components/route-guards';
 import { ReturnModal } from '@/components/sales-history';
 import { PinGate } from '@/components/shift-panels';
+import { TransferPanel } from '@/components/transfer-panel';
+import { refreshPosTransfer, confirmPosTransferReceived, cancelPosTransfer, type PosTransfer } from '@/lib/remote';
 import { CheckoutModal } from '@/components/checkout-modal';
 import { useTill } from '@/contexts/till-context';
 import { cachedTransactions, listTransactions, type Transaction } from '@/lib/transactions';
@@ -32,6 +34,11 @@ export default function HistoryPage() {
     </RequireCashier>
   );
 }
+function matchesStatus(row: Transaction, status: string) {
+  if (status === 'pending') return ['awaiting', 'review'].includes(row.status);
+  if (status === 'resolved') return ['completed', 'cancelled', 'voided', 'refunded'].includes(row.status);
+  return !status || row.status === status;
+}
 function History() {
   const params = useSearchParams();
   const { store, online, cashier, cashiers, refreshSyncState } = useTill();
@@ -45,6 +52,22 @@ function History() {
     [error, setError] = useState(''),
     [cached, setCached] = useState(false),
     [revision, setRevision] = useState(0);
+  const [legacy, setLegacy] = useState<PosTransfer | null>(null);
+  const [legacyBusy, setLegacyBusy] = useState(false);
+  async function manageLegacy(action: () => Promise<PosTransfer>) {
+    if (legacyBusy) return;
+    setLegacyBusy(true);
+    try {
+      const result = await action();
+      setLegacy(['paid', 'cancelled'].includes(result.status) ? null : result);
+      setRevision(value => value + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not update the transfer');
+    } finally {
+      setLegacyBusy(false);
+    }
+  }
+
   const [checkout, setCheckout] = useState<Checkout | null>(null),
     [options, setOptions] = useState<CheckoutOptions | null>(null);
   const [returnFor, setReturnFor] = useState<{
@@ -96,7 +119,7 @@ function History() {
             saved
               .filter(
                 (row) =>
-                  (!status || row.status === status) &&
+                  matchesStatus(row, status) &&
                   (!date ||
                     new Intl.DateTimeFormat('en-CA', {
                       timeZone: 'Africa/Lagos',
@@ -258,6 +281,8 @@ function History() {
             className="field-control mt-1 min-h-11 w-full rounded-lg border border-[var(--color-line)] px-3"
           >
             <option value="">All transactions</option>
+            <option value="pending">Pending</option>
+            <option value="resolved">Resolved</option>
             <option value="completed">Completed</option>
             <option value="awaiting">Awaiting payment</option>
             <option value="review">Needs review</option>
@@ -267,6 +292,13 @@ function History() {
           </select>
         </label>
       </form>
+      <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Quick status filters">
+        {[['', 'All'], ['pending', 'Pending'], ['resolved', 'Resolved']].map(([value, label]) => (
+          <button key={label} type="button" aria-pressed={status === value}
+            className="min-h-11 rounded-lg border border-[var(--color-line)] px-4 text-sm font-bold aria-pressed:bg-[var(--color-surface-2)]"
+            onClick={() => setStatus(value)}>{label}</button>
+        ))}
+      </div>
       {cached && (
         <p role="status" className="mb-4 text-sm">
           Offline — showing only transactions cached for this location on this device.
@@ -325,10 +357,11 @@ function History() {
                   Manage payment
                 </button>
               )}
-              {row.legacyTransferId && (
-                <Link href="/sell" className="inline-flex min-h-11 items-center underline">
-                  Manage existing transfer in POS Transfers
-                </Link>
+              {row.legacyTransferId && online && (
+                <button className="min-h-11 px-3 underline" disabled={legacyBusy}
+                  onClick={() => void manageLegacy(() => refreshPosTransfer(row.legacyTransferId!))}>
+                  Manage payment
+                </button>
               )}
               {row.actions.refund && cashier && (
                 <button
@@ -369,6 +402,18 @@ function History() {
         >
           Load more
         </button>
+      )}
+      {legacy && (
+        <TransferPanel transfer={legacy} busy={legacyBusy}
+          onClose={() => setLegacy(null)}
+          onCheck={() => void manageLegacy(() => refreshPosTransfer(legacy.clientSaleId))}
+          onConfirmReceived={() => manageLegacy(() => confirmPosTransferReceived(legacy.clientSaleId))}
+          onCancel={() => {
+            if (window.confirm('Cancel this transfer?')) {
+              void manageLegacy(() => cancelPosTransfer(legacy.clientSaleId));
+            }
+          }}
+        />
       )}
       {checkout && options && (
         <CheckoutModal
