@@ -1,6 +1,7 @@
 // The initial 48 mm printable width must be calibrated on the physical Z92.
 export const thermalStyles = `
 .receipt-paper { width: 48mm; margin: 0 auto; color: #000; background: #fff; font: 11px/1.45 Arial, sans-serif; overflow-wrap: anywhere; }
+.receipt-logo { display: block; width: 32mm; max-width: 100%; height: auto; margin: 0 auto 2mm; }
 .receipt-paper p { margin: 0 0 3px; }
 .receipt-paper h2 { font-size: 15px; font-weight: 800; margin: 0 0 5px; }
 .receipt-row { display: flex; flex-wrap: wrap; justify-content: space-between; column-gap: 6px; margin: 3px 0; }

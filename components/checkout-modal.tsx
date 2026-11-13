@@ -35,9 +35,9 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
   const [reference, setReference] = useState('');
   const [received, setReceived] = useState('');
   const [confirmed, setConfirmed] = useState(false);
-  const [acknowledged, setAcknowledged] = useState(false);
+  const [switchTo, setSwitchTo] = useState<{ provider: 'moniepoint' | 'squad'; method: 'card' | 'transfer' }>();
   const [showAccount, setShowAccount] = useState('');
-  const [requestId, setRequestId] = useState<string | null>(null);
+  const [request, setRequest] = useState<{ id: string; provider: string; method: string }>();
   const guard = useRef(false);
   const creation = useRef<Promise<Checkout> | null>(null);
   const callback = useRef(onUpdate);
@@ -67,12 +67,22 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
     try { const next = await creation.current; setRow(next); onCreated(next); await callback.current(next); return next; }
     catch (error) { creation.current = null; throw error; }
   };
-  const start = (provider: 'moniepoint' | 'squad', paymentMethod: 'card' | 'transfer') => run(async () => {
-    const current = await ensureCheckout();
-    const id = requestId || crypto.randomUUID(); setRequestId(id);
-    const next = await checkoutAttempt(current.id, { provider, method: paymentMethod, clientAttemptId: id, acknowledgeDuplicateRisk: acknowledged });
-    setRequestId(null); await accept(next);
-  });
+  const start = (provider: 'moniepoint' | 'squad', paymentMethod: 'card' | 'transfer', acknowledged = false) => {
+    const retry = request?.provider === provider && request.method === paymentMethod ? request : undefined;
+    if ((active || request) && !acknowledged && !retry) { setSwitchTo({ provider, method: paymentMethod }); return; }
+    setSwitchTo(undefined);
+    return run(async () => {
+      const current = await ensureCheckout();
+      const id = retry?.id || crypto.randomUUID();
+      setRequest({ id, provider, method: paymentMethod });
+      const next = await checkoutAttempt(current.id, {
+        provider, method: paymentMethod, clientAttemptId: id,
+        acknowledgeDuplicateRisk: acknowledged || Boolean(retry),
+      });
+      setRequest(undefined);
+      await accept(next);
+    });
+  };
 
   return <div className="modal-backdrop fixed inset-0 z-50 grid place-items-center p-4">
     <section role="dialog" aria-modal="true" aria-label="Customer checkout" className="modal-shell max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-2xl p-4">
@@ -90,8 +100,12 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
         {mode === 'full_credit' && <button className={actionStyle} disabled={busy || !dueDate} onClick={() => void run(ensureCheckout)}>Record full-credit sale</button>}
       </div>}
       {(!row || !['completed', 'cancelled'].includes(row.status)) && mode !== 'full_credit' && <div className="mt-4 space-y-3">
-        {active && <label className="block rounded-lg border border-[var(--color-line)] p-3 text-sm"><input type="checkbox" checked={acknowledged} onChange={e => setAcknowledged(e.target.checked)} /> An earlier payment may still arrive. I understand switching can result in two payments.</label>}
-        <fieldset disabled={busy || (active && !acknowledged) || (!row && mode === 'partial_credit' && (!dueDate || !(Number(upfront) > 0)))} className="space-y-2 disabled:opacity-50">
+        {switchTo && <div role="alert" className="space-y-2 rounded-lg border border-[var(--color-line)] p-3 text-sm">
+          <p>The earlier payment may still go through. Sending another request could charge the customer twice.</p>
+          <button disabled={busy} className={actionStyle} onClick={() => void start(switchTo.provider, switchTo.method, true)}>Send another payment request</button>
+          <button className="min-h-11 underline" onClick={() => setSwitchTo(undefined)}>Keep existing request</button>
+        </div>}
+        <fieldset disabled={busy || (!row && mode === 'partial_credit' && (!dueDate || !(Number(upfront) > 0)))} className="space-y-2 disabled:opacity-50">
           <div className="grid grid-cols-2 gap-2">
             <button disabled={!options.methods.find(m => m.id === 'moniepoint')?.available} className={actionStyle} onClick={() => void start('moniepoint', 'card')}>Moniepoint card</button>
             <button disabled={!options.methods.find(m => m.id === 'moniepoint')?.available} className={actionStyle} onClick={() => void start('moniepoint', 'transfer')}>Moniepoint transfer</button>
@@ -104,7 +118,9 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
         <button disabled={busy} className={actionStyle} onClick={() => void run(async () => { const next = await ensureCheckout(); setReceived(String(next.dueKobo / 100)); setManual(true); })}>Confirm payment received</button>
         {row?.attempts.map(attempt => <section key={attempt.id} className="rounded-lg border border-[var(--color-line)] p-3 text-sm">
           <p className="font-bold">{attempt.provider === 'moniepoint' ? 'Moniepoint' : 'Squad'} · {attempt.method} · <span role="status">{attemptLabels[attempt.status] ?? attempt.status}</span></p>
-          <p className="break-all text-xs">{attempt.reference}</p>
+          <Reference label="Merchant reference" value={attempt.reference} />
+          {attempt.providerReference && <Reference label="Moniepoint transaction reference" value={attempt.providerReference} />}
+          {attempt.providerPaidAt && <p>Provider payment time: {new Date(attempt.providerPaidAt).toLocaleString('en-NG', { timeZone: 'Africa/Lagos' })}</p>}
           {attempt.status === 'queued' && <p className="mt-2">Keep this reference. The request will send when the payment worker is available.</p>}
           {attempt.status === 'pending' && !attempt.instructions && <p className="mt-2">
             {attempt.provider === 'moniepoint' ? 'Check the assigned Moniepoint terminal for the payment prompt.' : 'Waiting for the transfer account details.'}
@@ -124,7 +140,7 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
           <label className="block text-sm">Actual method<select aria-label="Actual method" className={inputStyle} value={method} onChange={e => setMethod(e.target.value)}>{['Transfer', 'Card', 'Cash', 'Other'].map(m => <option key={m}>{m}</option>)}</select></label>
           <label className="block text-sm">Receiving account or method details<input aria-label="Receiving account" className={inputStyle} required value={account} onChange={e => setAccount(e.target.value)} /></label>
           <label className="block text-sm">Reason for manual confirmation<textarea aria-label="Confirmation reason" className={inputStyle} required value={reason} onChange={e => setReason(e.target.value)} /></label>
-          <label className="block text-sm">External reference (optional)<input className={inputStyle} value={reference} onChange={e => setReference(e.target.value)} /></label>
+          <label className="block text-sm">Settlement reference (optional)<input className={inputStyle} value={reference} onChange={e => setReference(e.target.value)} /></label>
           <label className="block text-sm"><input type="checkbox" required checked={confirmed} onChange={e => setConfirmed(e.target.checked)} /> I have checked receipt of the full {fmt(payable)} due now.</label>
           <button className={actionStyle} disabled={busy || !confirmed}>Confirm received payment</button>
           <button type="button" disabled={busy} className="min-h-11 w-full underline" onClick={() => setManual(false)}>Go back</button>
@@ -134,5 +150,13 @@ export function CheckoutModal({ cart, checkout, options, onCreated, onUpdate, on
       </div>}
       <button disabled={busy} className="mt-3 min-h-11 w-full underline" onClick={onClose}>{row?.status === 'completed' ? 'Close' : 'Back to till'}</button>
     </section>
+  </div>;
+}
+
+function Reference({ label, value }: { label: string; value: string }) {
+  return <div className="flex items-center justify-between gap-2 text-xs">
+    <p className="break-all">{label}: {value}</p>
+    <button type="button" className="min-h-11 underline" aria-label={'Copy ' + label}
+      onClick={() => void navigator.clipboard.writeText(value).then(() => toast.success('Reference copied'), () => toast.error('Could not copy the reference'))}>Copy</button>
   </div>;
 }

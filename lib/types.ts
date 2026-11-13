@@ -144,6 +144,7 @@ export interface PosSale {
   /** Tax charged (or, when tax-inclusive, the portion of the total that is tax). */
   tax?: number;
   taxRatePct?: number;
+  taxInclusive?: boolean;
   total: number;
   payments: PosPayment[];
   change: number;

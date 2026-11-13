@@ -41,6 +41,8 @@ export function Receipt({
         <div className="receipt-preview mx-auto my-6 w-fit bg-white px-4 py-5 text-black">
           <article className="receipt-paper" aria-label="Receipt details">
             <header className="text-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/salesos-receipt-logo.svg" alt="Sales OS" className="receipt-logo" />
               {store.storeName && <h2>{store.storeName}</h2>}
               <p>
                 {sale.kind === 'repayment'
@@ -73,7 +75,7 @@ export function Receipt({
             <section className="receipt-section" aria-label="Receipt totals">
               <Row label="Subtotal" value={fmt(sale.subtotal)} />
               {sale.discount > 0 && <Row label="Discount" value={`-${fmt(sale.discount)}`} />}
-              {!!sale.tax && (
+              {!!sale.tax && !(sale.taxInclusive ?? store.taxInclusive) && (
                 <Row
                   label={`${store.taxLabel || 'Tax'}${sale.taxRatePct ? ` ${sale.taxRatePct}%` : ''}`}
                   value={fmt(sale.tax)}

@@ -4,6 +4,7 @@ import { getJson, sendJson } from './remote';
 export type CheckoutMode = 'full_payment' | 'partial_credit' | 'full_credit';
 export type CheckoutOptions = { methods: Array<{ id: 'moniepoint' | 'squad' | 'manual'; name: string; available: boolean; reason?: string | null }> };
 export type CheckoutAttempt = { id: string; clientAttemptId: string; reference: string; provider: 'moniepoint' | 'squad'; method: string;
+  providerReference?: string; providerPaidAt?: string;
   status: string; amountKobo: number; payableKobo: number | null; feeKobo: number | null; reviewReason: string | null;
   instructions: { bankName: string; accountName: string; accountNumber: string } | null };
 export type Checkout = { id: string; clientSaleId: string; kind: 'sale' | 'repayment'; customerId: string; customerName: string;

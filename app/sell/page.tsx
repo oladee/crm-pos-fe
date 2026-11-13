@@ -731,9 +731,9 @@ function SellScreen() {
                 {orderDiscount > 0 ? 'Edit cart discount' : '+ Cart discount'}
               </button>
             )}
-            {tax > 0 && (
+            {tax > 0 && !store.taxInclusive && (
               <div className="flex justify-between text-xs text-[var(--color-ink-dim)]">
-                <span>{store.taxLabel || 'Tax'} {store.taxRatePct}%{store.taxInclusive ? ' (incl.)' : ''}</span>
+                <span>{store.taxLabel || 'Tax'} {store.taxRatePct}%</span>
                 <span>{fmt(tax)}</span>
               </div>
             )}
