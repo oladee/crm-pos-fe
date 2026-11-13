@@ -13,8 +13,11 @@ import { PosSale, Shift, Cashier, PaymentMethod, PosProduct, AssistRequest } fro
 import { cashDropsForShift } from './assist';
 
 const METHODS: PaymentMethod[] = ['Cash', 'Transfer', 'Card', 'Credit', 'Other'];
-export const dayOf = (iso: string) => iso.slice(0, 10);
-export const todayStr = () => new Date().toISOString().slice(0, 10);
+const tradingDate = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Africa/Lagos', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+export const dayOf = (iso: string) => tradingDate.format(new Date(iso));
+export const todayStr = () => dayOf(new Date().toISOString());
 
 /* ????????????????????????????????? per-cashier performance ????????????????????????????????? */
 

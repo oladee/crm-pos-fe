@@ -12,7 +12,7 @@ import { PosSale, Shift, Cashier, StoreProfile, PosProduct, AssistRequest, Resol
 import { AssistQueue } from './assist-panels';
 import { openCount } from '@/lib/assist';
 import {
-  cashierPerformance, reconcileDay, closingInventory, todayStr, dayOf,
+  cashierPerformance, reconcileDay, closingInventory, dayOf,
   CashierPerf, DayReconciliation, ClosingInventory,
 } from '@/lib/supervisor';
 import { fmt } from '@/lib/money';
@@ -23,8 +23,11 @@ type Tab = 'overview' | 'assist' | 'cashiers' | 'transactions' | 'stock' | 'reco
 
 export function SupervisorView({
   sales, shifts, cashiers, catalog, store, unsynced, stockCounts, onSaveCount,
+  day, setDay, refreshedAt, refresh, dataError, online,
   assists, onClaimAssist, onResolveAssist, onCancelAssist, onClose,
 }: {
+  day: string; setDay: (day: string) => void; refreshedAt?: Date;
+  refresh: () => void; dataError: string; online: boolean;
   sales: PosSale[]; shifts: Shift[]; cashiers: Cashier[]; catalog: PosProduct[];
   store: StoreProfile; unsynced: number;
   /** day → (productId → counted qty) */
@@ -38,7 +41,6 @@ export function SupervisorView({
 }) {
   const waiting = openCount(assists);
   const [tab, setTab] = useState<Tab>(waiting > 0 ? 'assist' : 'overview');
-  const [day, setDay] = useState(todayStr());
   const [expanded, setExpanded] = useState<string | null>(null);
   const [printPreview, setPrintPreview] = useState(false);
   const navRef = useRef<HTMLElement>(null);
@@ -71,7 +73,7 @@ export function SupervisorView({
     ['reconcile', 'Reconciliation', Scale, recon.openShifts || undefined],
   ] as [Tab, string, typeof Users, number | undefined][];
 
-  if (printPreview) return <ManagerPrint store={store} day={day} recon={recon} perf={perf} stock={stock} transactions={dayTxns} unsynced={unsynced} onBack={() => setPrintPreview(false)} />;
+  if (printPreview && refreshedAt) return <ManagerPrint store={store} day={day} recon={recon} perf={perf} stock={stock} transactions={dayTxns} unsynced={unsynced} onBack={() => setPrintPreview(false)} />;
 
   return (
     <div className="manager-shell flex min-h-dvh flex-col bg-[var(--color-bg)]">
@@ -91,10 +93,12 @@ export function SupervisorView({
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <label className="hidden text-[11px] font-bold text-[var(--color-ink-dim)] md:block" htmlFor="manager-date">Trading date</label>
+          <p className="text-xs" role={dataError ? 'alert' : 'status'}>{dataError || (refreshedAt ? `${online ? 'Updated' : 'Offline · cached'} ${refreshedAt.toLocaleTimeString('en-NG', { timeZone: 'Africa/Lagos' })}` : 'Location data unavailable')}</p>
           <input id="manager-date" type="date" value={day} onChange={(e) => setDay(e.target.value)}
             className="manager-control h-10 w-[110px] px-2 text-[11px] outline-none sm:w-[150px] sm:text-xs" />
           <ThemeToggle compact />
-          <button aria-label="Print manager report" title="Print report" onClick={() => setPrintPreview(true)} className="manager-icon-button manager-print-button">
+          <button type="button" onClick={refresh} disabled={!online}>Refresh</button>
+          <button disabled={!refreshedAt} aria-label="Print manager report" title="Print report" onClick={() => setPrintPreview(true)} className="manager-icon-button manager-print-button">
             <Printer size={16} />
           </button>
           <button onClick={onClose} className="inline-flex min-h-11 items-center gap-2 text-sm font-bold"><ArrowLeft size={18} />Back to POS</button>
@@ -126,12 +130,16 @@ export function SupervisorView({
 
         <main className="min-w-0">
           <div className="mx-auto w-full max-w-6xl px-4 py-5 sm:px-6 sm:py-7">
-            {tab === 'overview' && <OverviewTab perf={perf} recon={recon} stock={stock} waiting={waiting} setTab={setTab} />}
+            {!refreshedAt && tab !== 'assist' && tab !== 'transactions' && <p role="status">Location activity is unavailable until it can be loaded.</p>}
+            {refreshedAt && tab === 'overview' && <OverviewTab perf={perf} recon={recon} stock={stock} waiting={waiting} setTab={setTab} />}
             {tab === 'assist' && <AssistQueue assists={assists} catalog={catalog} onClaim={onClaimAssist} onResolve={onResolveAssist} onCancel={onCancelAssist} />}
-            {tab === 'cashiers' && <CashierTab perf={perf} expanded={expanded} setExpanded={setExpanded} />}
-            {tab === 'transactions' && <TransactionsTab txns={dayTxns} cashiers={cashiers} expanded={expanded} setExpanded={setExpanded} />}
-            {tab === 'stock' && <StockTab stock={stock} day={day} onSaveCount={onSaveCount} />}
-            {tab === 'reconcile' && <ReconcileTab recon={recon} stock={stock} />}
+            {refreshedAt && tab === 'cashiers' && <CashierTab perf={perf} expanded={expanded} setExpanded={setExpanded} />}
+            {tab === 'transactions' && <>
+              <a className="underline" href={`/history?date=${encodeURIComponent(day)}`}>Open location transactions</a>
+              {refreshedAt && <TransactionsTab txns={dayTxns} cashiers={cashiers} expanded={expanded} setExpanded={setExpanded} />}
+            </>}
+            {refreshedAt && tab === 'stock' && <StockTab stock={stock} day={day} onSaveCount={onSaveCount} />}
+            {refreshedAt && tab === 'reconcile' && <ReconcileTab recon={recon} stock={stock} />}
           </div>
         </main>
       </div>

@@ -47,7 +47,7 @@ function History() {
   const [rows, setRows] = useState<Transaction[]>([]),
     [cursor, setCursor] = useState<string | null>(null);
   const [q, setQ] = useState(''),
-    [date, setDate] = useState(''),
+    [date, setDate] = useState(params.get('date') || ''),
     [status, setStatus] = useState(params.get('status') || '');
   const [initialLoad, setInitialLoad] = useState(true);
   const [busy, setBusy] = useState(true),
