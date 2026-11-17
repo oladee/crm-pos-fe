@@ -58,7 +58,7 @@ export function SupervisorView({
   const recon = useMemo(() => reconcileDay(sales, shifts, day, unsynced, assists), [sales, shifts, day, unsynced, assists]);
   const stock = useMemo(() => closingInventory(catalog, sales, day, stockCounts[day]), [catalog, sales, day, stockCounts]);
   const dayTxns = useMemo(
-    () => sales.filter((s) => dayOf(s.createdAt) === day).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+    () => sales.filter((s) => !day || dayOf(s.createdAt) === day).sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [sales, day],
   );
   const closeReady = recon.canClose && recon.balanced && recon.shifts.every((r) => r.reconciled && r.variance === 0)
@@ -93,6 +93,7 @@ export function SupervisorView({
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           <label className="hidden text-[11px] font-bold text-[var(--color-ink-dim)] md:block" htmlFor="manager-date">Trading date</label>
+          <button type="button" aria-pressed={!day} onClick={() => setDay('')}>All time</button>
           <p className="text-xs" role={dataError ? 'alert' : 'status'}>{dataError || (refreshedAt ? `${online ? 'Updated' : 'Offline · cached'} ${refreshedAt.toLocaleTimeString('en-NG', { timeZone: 'Africa/Lagos' })}` : 'Location data unavailable')}</p>
           <input id="manager-date" type="date" value={day} onChange={(e) => setDay(e.target.value)}
             className="manager-control h-10 w-[110px] px-2 text-[11px] outline-none sm:w-[150px] sm:text-xs" />
@@ -135,10 +136,10 @@ export function SupervisorView({
             {tab === 'assist' && <AssistQueue assists={assists} catalog={catalog} onClaim={onClaimAssist} onResolve={onResolveAssist} onCancel={onCancelAssist} />}
             {refreshedAt && tab === 'cashiers' && <CashierTab perf={perf} expanded={expanded} setExpanded={setExpanded} />}
             {tab === 'transactions' && <>
-              <a className="underline" href={`/history?date=${encodeURIComponent(day)}`}>Open location transactions</a>
+              <a className="underline" href={day ? `/history?date=${encodeURIComponent(day)}` : '/history'}>Open location transactions</a>
               {refreshedAt && <TransactionsTab txns={dayTxns} cashiers={cashiers} expanded={expanded} setExpanded={setExpanded} />}
             </>}
-            {refreshedAt && tab === 'stock' && <StockTab stock={stock} day={day} onSaveCount={onSaveCount} />}
+            {refreshedAt && tab === 'stock' && (day ? <StockTab stock={stock} day={day} onSaveCount={onSaveCount} /> : <p>Select a trading date to review and count closing stock.</p>)}
             {refreshedAt && tab === 'reconcile' && <ReconcileTab recon={recon} stock={stock} />}
           </div>
         </main>
@@ -242,7 +243,7 @@ function OverviewTab({
           <div className="mb-3 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-black">Cashier activity</h2>
-              <p className="mt-0.5 text-xs text-[var(--color-ink-dim)]">Net sales for the selected date.</p>
+              <p className="mt-0.5 text-xs text-[var(--color-ink-dim)]">Net sales for the selected period.</p>
             </div>
             <button onClick={() => setTab('cashiers')} className="text-xs font-bold text-[var(--color-brand)]">View details</button>
           </div>
@@ -282,7 +283,7 @@ function CashierTab({ perf, expanded, setExpanded }: { perf: CashierPerf[]; expa
           {best.net > 0 && (
             <div className="manager-insight-line">
               <TrendingUp size={16} />
-              <p><b>{best.cashierName.split(' (')[0]}</b> leads the day with {fmt(best.net)} from {best.transactions} completed sales.</p>
+              <p><b>{best.cashierName.split(' (')[0]}</b> leads with {fmt(best.net)} from {best.transactions} completed sales.</p>
             </div>
           )}
 

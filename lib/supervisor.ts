@@ -53,8 +53,8 @@ const VARIANCE_WARN = 50_000;   // ???500 in kobo
 export function cashierPerformance(
   sales: PosSale[], shifts: Shift[], cashiers: Cashier[], day: string,
 ): CashierPerf[] {
-  const dayShifts = shifts.filter((s) => dayOf(s.openedAt) === day);
-  const daySales = sales.filter((s) => dayOf(s.createdAt) === day);
+  const dayShifts = shifts.filter((s) => !day || dayOf(s.openedAt) === day);
+  const daySales = sales.filter((s) => !day || dayOf(s.createdAt) === day);
 
   // every cashier who either worked a shift or rang something up
   const ids = new Set<string>([...dayShifts.map((s) => s.cashierId), ...daySales.map((s) => s.cashierId)]);
@@ -167,7 +167,7 @@ export interface ClosingInventory {
 export function closingInventory(
   catalog: PosProduct[], sales: PosSale[], day: string, counts?: Record<string, number>,
 ): ClosingInventory {
-  const daySales = sales.filter((s) => dayOf(s.createdAt) === day);
+  const daySales = sales.filter((s) => !day || dayOf(s.createdAt) === day);
   const sold = new Map<string, number>();
   const returned = new Map<string, number>();
 
@@ -254,8 +254,8 @@ export interface DayReconciliation {
 export function reconcileDay(
   sales: PosSale[], shifts: Shift[], day: string, unsynced: number, assists: AssistRequest[] = [],
 ): DayReconciliation {
-  const dayShifts = shifts.filter((s) => dayOf(s.openedAt) === day);
-  const daySales = sales.filter((s) => dayOf(s.createdAt) === day);
+  const dayShifts = shifts.filter((s) => !day || dayOf(s.openedAt) === day);
+  const daySales = sales.filter((s) => !day || dayOf(s.createdAt) === day);
   const positives = daySales.filter((s) => !s.reversalOf && s.kind !== 'repayment');
   const reversals = daySales.filter((s) => !!s.reversalOf);
 

@@ -10,7 +10,6 @@ import { SupervisorSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
 import { getJson } from '@/lib/remote';
 import { listTransactions } from '@/lib/transactions';
-import { dayOf, todayStr } from '@/lib/supervisor';
 import type { PosSale, Shift } from '@/lib/types';
 import { canFully } from '@/lib/permissions';
 
@@ -30,8 +29,7 @@ function SupervisorScreen() {
     saveDayCount, claimAssist, resolveAssist, cancelAssist,
   } = useTill();
   const [gate, setGate] = useState(false);
-  const [selectedDay, setDay] = useState<string>();
-  const day = selectedDay ?? todayStr();
+  const [day, setDay] = useState('');
   const [revision, setRevision] = useState(0);
   const [dataError, setDataError] = useState('');
   const location = store?.hubId || store?.storeId;
@@ -40,7 +38,7 @@ function SupervisorScreen() {
   const current = report?.location === location && report?.day === day ? report : undefined;
 
   useEffect(() => {
-    if (!actingSupervisor || !manager || !location || !day || !online) return;
+    if (!actingSupervisor || !manager || !location || !online) return;
     let active = true;
     let loading = false;
     async function load() {
@@ -51,29 +49,17 @@ function SupervisorScreen() {
         const shiftsRequest = getJson<{ data: RemoteShift[] }>('/pos/shifts', true);
         const salesRequest = (async () => {
           let before: string | null = null;
-          let hasTransactions = false;
           do {
-            const page = await listTransactions(location!, { date: day, ...(before ? { before } : {}) });
+            const page = await listTransactions(location!, { ...(day ? { date: day } : {}), ...(before ? { before } : {}) });
             for (const row of page.data) {
               if (row.locationId !== location) continue;
-              hasTransactions = true;
               if (row.receipt) sales.set(row.reference, row.receipt);
             }
             before = page.nextCursor;
           } while (active && before);
-          return hasTransactions;
         })();
-        const [shifts, hasTransactions] = await Promise.all([shiftsRequest, salesRequest]);
+        const [shifts] = await Promise.all([shiftsRequest, salesRequest]);
         if (!active) return;
-        if (!selectedDay && !hasTransactions && !shifts.data.some(row => row.opened_at && dayOf(row.opened_at) === day)) {
-          const latest = await listTransactions(location!);
-          if (!active) return;
-          const newest = latest.data.find(row => row.locationId === location);
-          if (newest && dayOf(newest.createdAt) < day) {
-            setDay(dayOf(newest.createdAt));
-            return;
-          }
-        }
         setReport({ location: location!, day, sales: [...sales.values()], shifts: shifts.data.map(mapShift), at: new Date() });
         setDataError('');
       } catch (error) {
@@ -85,7 +71,7 @@ function SupervisorScreen() {
     void load();
     const timer = window.setInterval(load, 30_000);
     return () => { active = false; window.clearInterval(timer); };
-  }, [actingSupervisor, manager, location, day, online, revision, selectedDay]);
+  }, [actingSupervisor, manager, location, day, online, revision]);
 
 
   useEffect(() => {

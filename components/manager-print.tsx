@@ -30,7 +30,7 @@ export function ManagerPrint({
         <h2>{store.storeName}</h2>
         <p>MANAGER DAILY REPORT</p>
         <p>Till: {store.deviceLabel}</p>
-        <p>Trading date: {day}</p>
+        <p>{day ? `Trading date: ${day}` : 'All time'}</p>
         <p>Printed: {receiptDate(new Date().toISOString())} WAT</p>
       </header>
       <section className="receipt-section">
