@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { useState, useMemo, useEffect, useRef } from 'react';
 import {
-  ArrowLeft, Users, Scale, AlertTriangle, CheckCircle2, Clock, CloudOff, Printer,
+  Users, Scale, AlertTriangle, CheckCircle2, Clock, CloudOff, Printer,
   TrendingUp, Receipt, Percent, RotateCcw, ShieldCheck, ChevronDown, ChevronUp,
   ListOrdered, Boxes, Search, Cloud, Loader2, Save, LifeBuoy, LayoutDashboard,
   ArrowRight,
@@ -102,7 +102,10 @@ export function SupervisorView({
           <button disabled={!refreshedAt} aria-label="Print manager report" title="Print report" onClick={() => setPrintPreview(true)} className="manager-icon-button manager-print-button">
             <Printer size={16} />
           </button>
-          <button onClick={onClose} className="inline-flex min-h-11 items-center gap-2 text-sm font-bold"><ArrowLeft size={18} />Back to POS</button>
+          <button type="button" role="switch" aria-checked={true} onClick={onClose} className="secondary-action inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-3 text-xs font-bold">
+              <span aria-hidden="true" className="flex h-4 w-7 items-center rounded-full bg-[var(--color-brand)] p-0.5"><span className="h-3 w-3 rounded-full bg-white translate-x-3" /></span>
+              Manager view
+            </button>
         </div>
       </header>
 

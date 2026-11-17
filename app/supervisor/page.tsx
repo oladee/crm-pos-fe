@@ -2,9 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { toast } from 'sonner';
 import { SupervisorView } from '@/components/supervisor-view';
-import { PinGate } from '@/components/shift-panels';
 import { RequireCashier } from '@/components/route-guards';
 import { SupervisorSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
@@ -28,7 +26,6 @@ function SupervisorScreen() {
     cashier, shift, actingSupervisor, setActingSupervisor,
     saveDayCount, claimAssist, resolveAssist, cancelAssist,
   } = useTill();
-  const [gate, setGate] = useState(false);
   const [day, setDay] = useState('');
   const [revision, setRevision] = useState(0);
   const [dataError, setDataError] = useState('');
@@ -75,38 +72,22 @@ function SupervisorScreen() {
 
 
   useEffect(() => {
-    if (actingSupervisor) return;
-    if (canFully(cashier?.role, 'sale.viewAll') && cashier) {
-      setActingSupervisor(cashier.name);
+    if (!manager) {
+      router.replace(shift ? '/sell' : '/shift');
       return;
     }
-    setGate(true);
-  }, [actingSupervisor, cashier, setActingSupervisor]);
+    if (!actingSupervisor && cashier) setActingSupervisor(cashier.name);
+  }, [actingSupervisor, cashier, manager, router, setActingSupervisor, shift]);
 
   const leave = () => {
     setActingSupervisor(null);
     router.replace(shift ? '/sell' : '/shift');
   };
 
-  const authorise = (pin: string) => {
-    const sup = cashiers.find((c) => c.pin === pin && c.isActive && canFully(c.role, 'sale.viewAll'));
-    if (!sup) { toast.error('That PIN cannot open the supervisor view'); return; }
-    setActingSupervisor(sup.name);
-    setGate(false);
-  };
-
-  if (!store) return null;
+  if (!store || !manager) return null;
 
   return (
     <>
-      {gate && (
-        <PinGate
-          title="Supervisor access"
-          note="Cashier performance and end-of-day reconciliation are supervisor-only."
-          onCancel={leave}
-          onVerify={authorise}
-        />
-      )}
       {actingSupervisor && (
         <SupervisorView
           day={day}

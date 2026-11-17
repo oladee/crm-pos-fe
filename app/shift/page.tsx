@@ -2,11 +2,10 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ChevronRight, Clock, ShieldCheck } from 'lucide-react';
+import { ChevronRight, Clock } from 'lucide-react';
 import { SalesOsBrand } from '@/components/brand';
 import { ThemeToggle } from '@/components/theme-provider';
-import { toast } from 'sonner';
-import { OpenShiftModal, PinGate } from '@/components/shift-panels';
+import { OpenShiftModal } from '@/components/shift-panels';
 import { RequireCashier } from '@/components/route-guards';
 import { ShiftSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
@@ -22,9 +21,8 @@ export default function ShiftPage() {
 
 function ShiftScreen() {
   const router = useRouter();
-  const { cashier, cashiers, shift, openShift, logout, setActingSupervisor } = useTill();
+  const { cashier, shift, openShift, logout } = useTill();
   const [showOpen, setShowOpen] = useState(false);
-  const [supervisorGate, setSupervisorGate] = useState(false);
 
   useEffect(() => {
     if (shift) router.replace('/sell');
@@ -32,22 +30,7 @@ function ShiftScreen() {
 
   if (shift) return null;
 
-  const openSupervisor = () => {
-    if (canFully(cashier?.role, 'sale.viewAll')) {
-      setActingSupervisor(cashier!.name);
-      router.push('/supervisor');
-    } else {
-      setSupervisorGate(true);
-    }
-  };
-
-  const authoriseSupervisor = (pin: string) => {
-    const sup = cashiers.find((c) => c.pin === pin && c.isActive && canFully(c.role, 'sale.viewAll'));
-    if (!sup) { toast.error('That PIN cannot open the supervisor view'); return; }
-    setActingSupervisor(sup.name);
-    setSupervisorGate(false);
-    router.push('/supervisor');
-  };
+  const openSupervisor = () => router.push('/supervisor');
 
   return (
     <>
@@ -77,7 +60,10 @@ function ShiftScreen() {
           </div>
           <button onClick={() => setShowOpen(true)} className="primary-action mt-5 inline-flex h-14 w-full items-center justify-center gap-2 rounded-[11px] text-base font-black">Start my shift <ChevronRight size={18} /></button>
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <button onClick={openSupervisor} className="secondary-action inline-flex h-11 items-center justify-center gap-1.5 rounded-[10px] text-xs font-bold"><ShieldCheck size={15} /> Manager dashboard</button>
+            {canFully(cashier?.role, 'sale.viewAll') && <button type="button" role="switch" aria-checked={false} onClick={openSupervisor} className="secondary-action inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-3 text-xs font-bold">
+              <span aria-hidden="true" className="flex h-4 w-7 items-center rounded-full bg-[var(--color-line-strong)] p-0.5"><span className="h-3 w-3 rounded-full bg-white " /></span>
+              Manager view
+            </button>}
             <button onClick={() => { logout(); router.replace('/login'); }} className="secondary-action h-11 rounded-[10px] text-xs font-bold text-[var(--color-ink-dim)]">Use another account</button>
           </div>
         </div>
@@ -91,14 +77,6 @@ function ShiftScreen() {
             setShowOpen(false);
             router.replace('/sell');
           }}
-        />
-      )}
-      {supervisorGate && (
-        <PinGate
-          title="Supervisor access"
-          note="Cashier performance and end-of-day reconciliation are supervisor-only."
-          onCancel={() => setSupervisorGate(false)}
-          onVerify={authoriseSupervisor}
         />
       )}
     </>

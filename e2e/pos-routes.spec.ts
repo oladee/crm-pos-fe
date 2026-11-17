@@ -77,7 +77,7 @@ test.describe('POS route split', () => {
     await page.waitForURL('**/sell', { timeout: 10_000 });
   });
 
-  test('cashier is kept off /settings and gated on /supervisor', async ({ page }) => {
+  test('cashier is kept off /settings and redirected from /supervisor', async ({ page }) => {
     await loginAndOpenShift(page, 'aisha', '1234');
     await openMore(page);
     await expect(page.getByRole('button', { name: 'POS settings' })).toHaveCount(0);
@@ -85,9 +85,9 @@ test.describe('POS route split', () => {
     await page.goto('/settings');
     await page.waitForURL('**/sell', { timeout: 10_000 });
 
+    await expect(page.getByRole('switch', { name: 'Manager view' })).toHaveCount(0);
     await page.goto('/supervisor');
-    await page.waitForURL('**/supervisor', { timeout: 10_000 });
-    await expect(page.getByText('Supervisor access')).toBeVisible();
+    await page.waitForURL('**/sell', { timeout: 10_000 });
   });
 
   test('admin reaches /settings and supervisor without a PIN gate', async ({ page }) => {
@@ -102,10 +102,10 @@ test.describe('POS route split', () => {
     await page.getByRole('button', { name: 'Close' }).click();
     await page.waitForURL('**/sell', { timeout: 10_000 });
 
-    await openMore(page);
-    await page.getByRole('button', { name: 'Manager dashboard' }).click();
+    await page.getByRole('switch', { name: 'Manager view', checked: false }).click();
     await page.waitForURL('**/supervisor', { timeout: 10_000 });
-    await expect(page.getByText('Supervisor access')).toHaveCount(0);
+    await page.getByRole('switch', { name: 'Manager view', checked: true }).click();
+    await expect(page).toHaveURL(/\/sell$/);
   });
 
   test('a complete PIN shows the signing pulse until the next screen', async ({ page }) => {

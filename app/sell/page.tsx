@@ -32,7 +32,7 @@ import { RequireShift } from '@/components/route-guards';
 import { SellSkeleton } from '@/components/skeletons';
 import { useTill } from '@/contexts/till-context';
 import { useLiveTill } from '@/contexts/live-till-context';
-import { newAssistId, openCount } from '@/lib/assist';
+import { newAssistId } from '@/lib/assist';
 import { can, canFully, roleLabel } from '@/lib/permissions';
 import { SalesOsBrand } from '@/components/brand';
 import { ThemeToggle } from '@/components/theme-provider';
@@ -216,7 +216,6 @@ function SellScreen() {
   }, [lines, orderDiscount, online, store?.deviceId, store?.hubId, store?.storeId]);
   const cartDiscountPct = maxDiscountPctInCart(lines, orderDiscount);
   const needsDiscountApproval = store ? cartDiscountPct > store.discountApprovalThresholdPct : false;
-  const waitingAssists = openCount(assists);
   const myOpen = assists.filter((a) => a.cashierId === cashier?.id && (a.status === 'open' || a.status === 'in_progress')).length;
   const myResolved = assists.filter((a) => a.cashierId === cashier?.id && a.status === 'resolved').length;
 
@@ -557,6 +556,10 @@ function SellScreen() {
             className="top-action inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold text-[var(--color-ink-dim)] hover:text-[var(--color-ink)]">
             <ReceiptIcon size={15} /><span className="hidden sm:inline">Transactions</span>
           </button>
+          {canFully(cashier.role, 'sale.viewAll') && <button type="button" role="switch" aria-checked={false} onClick={openSupervisor} className="secondary-action inline-flex min-h-11 items-center justify-center gap-2 rounded-[10px] px-3 text-xs font-bold">
+              <span aria-hidden="true" className="flex h-4 w-7 items-center rounded-full bg-[var(--color-line-strong)] p-0.5"><span className="h-3 w-3 rounded-full bg-white " /></span>
+              Manager view
+            </button>}
           <div className="hidden lg:block"><ThemeToggle compact /></div>
           <button onClick={() => setShowMore((v) => !v)} aria-label="More actions" aria-expanded={showMore} className="top-action inline-flex h-10 items-center gap-1.5 rounded-[10px] px-3 text-xs font-bold">
             <Menu size={16} /> <span className="hidden sm:inline">More</span>
@@ -566,7 +569,6 @@ function SellScreen() {
           <div className="modal-shell absolute right-3 top-[4.2rem] z-50 w-72 space-y-1 rounded-[14px] p-2">
             <p className="px-3 py-2 text-xs text-[var(--color-ink-dim)]">{todayCount} sale{todayCount === 1 ? '' : 's'} today <span className="mx-1 text-[var(--color-line-strong)]">/</span> {roleLabel(cashier.role)}</p>
             <MenuAction icon={LifeBuoy} label="My help requests" onClick={() => { setShowMore(false); setShowMyRequests(true); }} badge={myOpen + myResolved} />
-            <MenuAction icon={ShieldCheck} label="Manager dashboard" onClick={() => { setShowMore(false); openSupervisor(); }} badge={waitingAssists} />
             <MenuAction icon={ReceiptIcon} label="Transactions" onClick={() => { setShowMore(false); router.push('/history'); }} />
             <MenuAction icon={FileText} label="Send updates to CRM" onClick={() => { setShowMore(false); void copyPayloadForCrm(); }} />
             <MenuAction icon={Clock} label="View shift totals" onClick={() => { setShowMore(false); showReport('X'); }} />
